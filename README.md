@@ -91,6 +91,18 @@ tomatui export --format csv
 tomatui db-path
 ```
 
+## Recommended Terminal Setup (Floating & Transparent)
+
+For the best experience, run `tomatui` in a terminal emulator that supports **always-on-top / floating windows** and **background transparency** (such as [Ghostty](https://ghostty.org), [iTerm2](https://iterm2.com), [WezTerm](https://wezfurlong.org/wezterm/), [Kitty](https://sw.kovidgoyal.net/kitty/), or [Alacritty](https://alacritty.org)). This lets `tomatui` sit quietly in a corner of your screen as a lightweight floating Pomodoro widget while you work in other apps.
+
+- `tomatui` inherits your terminal's transparency by default (**`, Settings` → Transparent Background: On**).
+- Example Ghostty config (`~/.config/ghostty/config`):
+  ```ini
+  background-opacity = 0.85
+  background-blur = true
+  ```
+  *(Use Ghostty's Window → **Float on Top** option to keep your timer visible above other windows.)*
+
 ## Data Location
 
 By default, data is stored in a single SQLite (WAL) database:

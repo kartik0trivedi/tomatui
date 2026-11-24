@@ -10,27 +10,70 @@ A clean, offline-first Pomodoro TUI & agent-friendly CLI written in Rust, backed
 - **Quick-Launch CLI & Agent JSON Interface**: Launch batches directly from your shell (`tomatui backend-api --25 --2`) and let AI agents query or update sessions via structured `--json` output or direct SQLite reads.
 - **Zero-Asset Audio & Alerts**: Pure in-memory synthesized PCM16 chimes + native desktop notifications.
 
-## Quick Start
+## Installation
+
+### Prerequisites
+- **Rust & Cargo**: Install via [rustup](https://rustup.rs) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
+- **SQLite**: Bundled automatically inside the binary — no separate SQLite installation required.
+- **OS Build Dependencies**:
+  - **macOS**: None beyond Xcode Command Line Tools (`xcode-select --install`).
+  - **Windows**: None beyond standard Rust toolchain.
+  - **Linux**: Audio headers (`sudo apt install -y libasound2-dev pkg-config` on Debian/Ubuntu, or `sudo pacman -S alsa-lib pkgconf` on Arch).
+
+### Option 1: Install Globally from GitHub (Recommended)
 
 ```bash
-# Build and run the Opening View
-cargo run --release
+cargo install --git https://github.com/kartik0trivedi/tomatui
+```
+
+Cargo automatically downloads and compiles all Rust dependencies (including bundled SQLite) and installs the `tomatui` binary to `~/.cargo/bin/tomatui`.
+
+### Option 2: Install from Local Clone
+
+```bash
+git clone https://github.com/kartik0trivedi/tomatui.git
+cd tomatui
+cargo install --path .
+```
+
+To update an existing installation after pulling changes:
+
+```bash
+cargo install --path . --force
+```
+
+### Ensure `~/.cargo/bin` is on your `PATH`
+
+If `tomatui` is not found after installing, add Cargo's bin directory to your shell profile:
+
+```bash
+# Zsh (~/.zshrc) or Bash (~/.bashrc)
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+## Quick Start
+
+Once installed, run `tomatui` from any terminal directory:
+
+```bash
+# Open the interactive TUI (Opening View)
+tomatui
 
 # Quick-launch 2 x 25m focus sessions on "backend-api" (5m default break)
-cargo run --release -- backend-api --25 --2
+tomatui backend-api --25 --2
 
-# Install globally to ~/.cargo/bin/tomatui
-cargo install --path .
+# Specify an activity and custom break duration
+tomatui backend-api --25 --2 --activity "API schema" --break 10
+
+# Start an unassigned batch (assign project/activity later)
+tomatui --50 --2
 ```
 
 ## CLI & Agent Usage
 
-```bash
-# Quick-launch shorthand
-tomatui backend-api --25 --2
-tomatui backend-api --25 --2 --activity "API schema" --break 10
-tomatui --50 --2
+Every management and analytics subcommand supports `--json` for scripts and AI agents:
 
+```bash
 # Projects & Activities
 tomatui projects list --json
 tomatui projects add backend-api --json

@@ -177,10 +177,14 @@ fn render_active(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .collect();
     f.render_widget(Paragraph::new(digit_lines).alignment(Alignment::Center), v[2]);
 
-    // Smooth sub-cell progress bar (8 fractional steps per character via Unicode eighth-blocks)
+    // Smooth sub-cell progress bar (8 fractional steps per character).
+    // Full and empty cells both use full-cell backgrounds so filled and track heights match
+    // identically in Ghostty and other terminals; the track uses a subtle tint of phase_color.
+    let track_color = blend_color(phase_color, theme.button_fg(), 0.28);
     let bar_len = (area.width as usize).saturating_sub(28).clamp(24, 48);
     let sub_steps = bar_len * 8;
-    let total_eighths = ((app.timer.progress_ratio() * sub_steps as f64).round() as usize).min(sub_steps);
+    let total_eighths =
+        ((app.timer.progress_ratio() * sub_steps as f64).round() as usize).min(sub_steps);
     let full_cells = total_eighths / 8;
     let rem_eighths = total_eighths % 8;
     let partial_glyph = match rem_eighths {
@@ -212,20 +216,23 @@ fn render_active(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     } else {
         format!("  {}m", app.timer.plan.work_mins)
     };
-    let mut progress_spans = vec![Span::styled(
-        "█".repeat(full_cells),
-        Style::default().fg(phase_color).bg(theme.highlight),
-    )];
+    let mut progress_spans = Vec::new();
+    if full_cells > 0 {
+        progress_spans.push(Span::styled(
+            " ".repeat(full_cells),
+            Style::default().bg(phase_color),
+        ));
+    }
     if !partial_glyph.is_empty() {
         progress_spans.push(Span::styled(
             partial_glyph,
-            Style::default().fg(phase_color).bg(theme.highlight),
+            Style::default().fg(phase_color).bg(track_color),
         ));
     }
     if empty_cells > 0 {
         progress_spans.push(Span::styled(
             " ".repeat(empty_cells),
-            Style::default().bg(theme.highlight),
+            Style::default().bg(track_color),
         ));
     }
     progress_spans.push(Span::styled(batch_seq, Style::default().fg(theme.muted)));
@@ -294,6 +301,27 @@ fn render_active(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         )),
         stop_rect,
     );
+}
+
+fn blend_color(
+    fg: ratatui::style::Color,
+    bg: ratatui::style::Color,
+    alpha: f32,
+) -> ratatui::style::Color {
+    if let (
+        ratatui::style::Color::Rgb(fr, fg_c, fb),
+        ratatui::style::Color::Rgb(br, bg_c, bb),
+    ) = (fg, bg)
+    {
+        let mix = |a: u8, b: u8| -> u8 {
+            ((a as f32) * alpha + (b as f32) * (1.0 - alpha))
+                .round()
+                .clamp(0.0, 255.0) as u8
+        };
+        ratatui::style::Color::Rgb(mix(fr, br), mix(fg_c, bg_c), mix(fb, bb))
+    } else {
+        bg
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

@@ -763,7 +763,7 @@ impl App {
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
-        const TOTAL_ITEMS: usize = 10;
+        const TOTAL_ITEMS: usize = 11;
         match key.code {
             KeyCode::Esc => {
                 let target = if self.previous_tab == ActiveTab::Settings {
@@ -791,7 +791,7 @@ impl App {
                 self.adjust_setting(1);
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
-                if self.settings_idx == 9 {
+                if self.settings_idx == 10 {
                     self.modal = ModalState::DbPathEditor {
                         buf: Database::display_short_path(self.db.path()),
                     };
@@ -833,7 +833,8 @@ impl App {
             5 => self.config.auto_start_work = !self.config.auto_start_work,
             6 => self.config.sound_enabled = !self.config.sound_enabled,
             7 => self.config.desktop_notifications = !self.config.desktop_notifications,
-            8 => {
+            8 => self.config.transparent_background = !self.config.transparent_background,
+            9 => {
                 self.config.theme = if delta >= 0 {
                     self.config.theme.next()
                 } else {

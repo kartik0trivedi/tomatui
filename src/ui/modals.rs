@@ -27,7 +27,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let field = |label: &str, val: &str, active: bool| {
                 let style = if active {
                     Style::default()
-                        .fg(theme.bg)
+                        .fg(theme.button_fg())
                         .bg(theme.primary)
                         .add_modifier(Modifier::BOLD)
                 } else {
@@ -153,7 +153,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     Span::styled(
                         format!(" {} ", est_buf),
                         if *focus == 1 {
-                            Style::default().fg(theme.bg).bg(theme.primary)
+                            Style::default().fg(theme.button_fg()).bg(theme.primary)
                         } else {
                             Style::default().fg(theme.fg).bg(theme.highlight)
                         },

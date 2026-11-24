@@ -12,6 +12,7 @@ pub struct Config {
     pub auto_start_work: bool,
     pub sound_enabled: bool,
     pub desktop_notifications: bool,
+    pub transparent_background: bool,
     pub theme: ThemeChoice,
 }
 
@@ -26,6 +27,7 @@ impl Default for Config {
             auto_start_work: false,
             sound_enabled: true,
             desktop_notifications: true,
+            transparent_background: true,
             theme: ThemeChoice::default(),
         }
     }

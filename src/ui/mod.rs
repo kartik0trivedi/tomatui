@@ -18,11 +18,16 @@ use ratatui::{
 };
 
 pub fn render(f: &mut Frame, app: &mut App) {
-    let theme = Theme::from_choice(app.config.theme);
+    let theme = Theme::from_choice_with_transparency(
+        app.config.theme,
+        app.config.transparent_background,
+    );
     let area = f.area();
 
-    // Fill clean background
-    f.render_widget(Block::default().style(Style::default().bg(theme.bg)), area);
+    // Fill background (Color::Reset when transparent so Ghostty/terminal opacity shows through)
+    if theme.bg != ratatui::style::Color::Reset {
+        f.render_widget(Block::default().style(Style::default().bg(theme.bg)), area);
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

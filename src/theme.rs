@@ -133,6 +133,19 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn from_choice_with_transparency(choice: ThemeChoice, transparent: bool) -> Self {
+        let mut theme = Self::from_choice(choice);
+        if transparent {
+            theme.bg = Color::Reset;
+        }
+        theme
+    }
+
+    /// Solid contrasting foreground for inverted primary buttons (stays opaque when bg is Reset).
+    pub fn button_fg(&self) -> Color {
+        Self::from_choice(self.choice).bg
+    }
+
     pub fn from_choice(choice: ThemeChoice) -> Self {
         match choice {
             ThemeChoice::CatppuccinMocha => Self {

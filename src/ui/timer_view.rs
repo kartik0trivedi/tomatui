@@ -98,7 +98,7 @@ fn render_opening(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     app.click_targets.opening_start_btn = btn_rect;
     let btn_style = if app.opening_focus == 2 {
         Style::default()
-            .fg(theme.bg)
+            .fg(theme.button_fg())
             .bg(theme.primary)
             .add_modifier(Modifier::BOLD)
     } else {

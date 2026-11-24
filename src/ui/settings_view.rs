@@ -37,6 +37,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ("Auto-start Work", bool_str(cfg.auto_start_work)),
         ("Audio Chimes", bool_str(cfg.sound_enabled)),
         ("Desktop Notifications", bool_str(cfg.desktop_notifications)),
+        ("Transparent Background", bool_str(cfg.transparent_background)),
         ("Color Theme", format!("◀ {} ▶", cfg.theme.name())),
         ("Data Location (SQLite)", format!("{}  (Enter to change)", db_display)),
     ];

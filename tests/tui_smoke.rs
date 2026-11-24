@@ -84,8 +84,8 @@ fn test_all_views_and_modals_render_without_panic() {
     app.on_key(key(KeyCode::Char('T')));
     assert_eq!(app.active_tab, ActiveTab::Timer);
     app.on_key(key(KeyCode::Char(',')));
-    // Open Data Location editor modal on Settings row 9
-    app.settings_idx = 9;
+    // Open Data Location editor modal on Settings row 10
+    app.settings_idx = 10;
     app.on_key(key(KeyCode::Enter));
     assert!(matches!(app.modal, ModalState::DbPathEditor { .. }));
     terminal.draw(|f| ui::render(f, &mut app)).unwrap();

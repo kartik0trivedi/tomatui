@@ -76,11 +76,13 @@ fn render_header(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let mut cursor_x = area.x + 14;
     for (num, label, tab) in tabs {
         let is_active = app.active_tab == tab;
-        let num_style = Style::default().fg(if is_active {
-            theme.primary
+        let num_style = if is_active {
+            Style::default()
+                .fg(theme.primary)
+                .add_modifier(Modifier::BOLD)
         } else {
-            theme.border
-        });
+            Style::default().fg(theme.fg)
+        };
         let label_style = if is_active {
             Style::default()
                 .fg(theme.primary)
@@ -112,15 +114,21 @@ fn render_header(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let line = Line::from(spans);
     f.render_widget(Paragraph::new(line), Rect::new(area.x, nav_y, area.width, 1));
 
-    let settings_style = if app.active_tab == ActiveTab::Settings {
-        Style::default()
-            .fg(theme.primary)
-            .add_modifier(Modifier::BOLD)
+    let settings_line = if app.active_tab == ActiveTab::Settings {
+        Line::from(Span::styled(
+            settings_label,
+            Style::default()
+                .fg(theme.primary)
+                .add_modifier(Modifier::BOLD),
+        ))
     } else {
-        Style::default().fg(theme.muted)
+        Line::from(vec![
+            Span::styled(", ", Style::default().fg(theme.fg)),
+            Span::styled("Settings  ", Style::default().fg(theme.muted)),
+        ])
     };
     f.render_widget(
-        Paragraph::new(Span::styled(settings_label, settings_style)),
+        Paragraph::new(settings_line),
         Rect::new(right_x, nav_y, settings_w, 1),
     );
 
@@ -145,18 +153,6 @@ fn render_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Rect::new(area.x, area.y, area.width, 1),
     );
 
-    let left_text = if let Some(ref msg) = app.status_message {
-        Span::styled(format!("  {}", msg), Style::default().fg(theme.primary))
-    } else {
-        let summary = format!(
-            "  Today: {}m ({} sessions) · {}-day streak",
-            app.stats_report.today_focus_mins,
-            app.stats_report.today_sessions,
-            app.stats_report.current_streak_days
-        );
-        Span::styled(summary, Style::default().fg(theme.muted))
-    };
-
     let hints = match app.active_tab {
         ActiveTab::Timer if app.timer.status == TimerStatus::Idle => {
             "↑↓ Move   Enter Start   p Project   t Plan   ? Help   q Quit  "
@@ -168,17 +164,56 @@ fn render_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ActiveTab::Settings => "1-4 Tabs   Esc Back   ↑↓ Select   ←→/Enter Edit   q Quit  ",
     };
 
-    let hints_w = hints.chars().count() as u16;
     let footer_y = area.y + 1;
-    f.render_widget(
-        Paragraph::new(Line::from(left_text)),
-        Rect::new(area.x, footer_y, area.width, 1),
+    let hints_w = hints.chars().count() as u16;
+
+    // If a transient status message is active, give it priority so it never collides with hints
+    if let Some(ref msg) = app.status_message {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("  {}", msg),
+                Style::default().fg(theme.primary),
+            ))),
+            Rect::new(area.x, footer_y, area.width, 1),
+        );
+        return;
+    }
+
+    let left_summary = format!(
+        "  Today: {}m ({} sessions) · {}-day streak",
+        app.stats_report.today_focus_mins,
+        app.stats_report.today_sessions,
+        app.stats_report.current_streak_days
     );
-    if area.width > hints_w + 4 {
+    let left_w = left_summary.chars().count() as u16;
+
+    if area.width >= left_w + hints_w + 2 {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                left_summary,
+                Style::default().fg(theme.muted),
+            ))),
+            Rect::new(area.x, footer_y, left_w, 1),
+        );
         let hx = area.x + area.width.saturating_sub(hints_w);
         f.render_widget(
             Paragraph::new(Span::styled(hints, Style::default().fg(theme.muted))),
             Rect::new(hx, footer_y, hints_w, 1),
+        );
+    } else if area.width >= hints_w + 2 {
+        // Compact floating window: center or right-align hints cleanly with zero overlap
+        let hx = area.x + (area.width.saturating_sub(hints_w)) / 2;
+        f.render_widget(
+            Paragraph::new(Span::styled(hints, Style::default().fg(theme.muted))),
+            Rect::new(hx, footer_y, hints_w, 1),
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!("  {}", hints.trim()),
+                Style::default().fg(theme.muted),
+            )),
+            Rect::new(area.x, footer_y, area.width, 1),
         );
     }
 }

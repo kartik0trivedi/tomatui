@@ -1,4 +1,6 @@
-# tomatui
+<p align="center">
+  <img src="assets/logo-light.svg" alt="tomatui — Pomodoro timer for your terminal and agents" width="760" />
+</p>
 
 A clean, offline-first Pomodoro TUI & agent-friendly CLI written in Rust, backed by SQLite (WAL mode).
 

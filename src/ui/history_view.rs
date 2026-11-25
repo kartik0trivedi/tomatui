@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::db::SessionStatus;
 use crate::theme::Theme;
+use crate::timer::PomodoroPhase;
 use chrono::{DateTime, Local};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -52,8 +53,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let header = Line::from(Span::styled(
         format!(
-            "  {:<9} {:<16} {:>5}  {:<10} {:<16} {:<18} {}",
-            "ID", "Started", "Dur", "Status", "Project", "Activity", "Notes"
+            "  {:<9} {:<13} {:<5} {:>4}  {:<10} {:<15} {:<17} {}",
+            "ID", "Started", "Type", "Dur", "Status", "Project", "Activity", "Notes"
         ),
         Style::default().fg(theme.muted),
     ));
@@ -70,6 +71,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         return;
     }
 
+    let fixed_cols = 2 + 10 + 14 + 6 + 6 + 11 + 16 + 18;
+    let notes_max = (chunks[2].width as usize).saturating_sub(fixed_cols).max(16);
+
     let items: Vec<ListItem> = app
         .sessions
         .iter()
@@ -81,6 +85,11 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let when = DateTime::parse_from_rfc3339(&s.started_at)
                 .map(|dt| dt.with_timezone(&Local).format("%b %d %H:%M").to_string())
                 .unwrap_or_else(|_| s.started_at[..s.started_at.len().min(12)].to_string());
+            let (phase_lbl, phase_col) = match s.phase {
+                PomodoroPhase::Work => ("work", theme.work),
+                PomodoroPhase::ShortBreak => ("rest", theme.short_break),
+                PomodoroPhase::LongBreak => ("long", theme.long_break),
+            };
             let status_col = match s.status {
                 SessionStatus::Completed => theme.success,
                 SessionStatus::Partial => theme.warning,
@@ -101,9 +110,13 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     format!("{:<9} ", s.short_id()),
                     Style::default().fg(theme.muted).bg(bg),
                 ),
-                Span::styled(format!("{:<16} ", when), Style::default().fg(theme.fg).bg(bg)),
+                Span::styled(format!("{:<13} ", when), Style::default().fg(theme.fg).bg(bg)),
                 Span::styled(
-                    format!("{:>4}m  ", s.actual_mins()),
+                    format!("{:<5} ", phase_lbl),
+                    Style::default().fg(phase_col).bg(bg),
+                ),
+                Span::styled(
+                    format!("{:>3}m  ", s.actual_mins()),
                     Style::default().fg(theme.fg).bg(bg),
                 ),
                 Span::styled(
@@ -111,15 +124,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     Style::default().fg(status_col).bg(bg),
                 ),
                 Span::styled(
-                    format!("{:<16} ", trunc(proj_str, 15)),
+                    format!("{:<15} ", trunc(proj_str, 14)),
                     Style::default().fg(proj_col).bg(bg),
                 ),
                 Span::styled(
-                    format!("{:<18} ", trunc(act_str, 17)),
+                    format!("{:<17} ", trunc(act_str, 16)),
                     Style::default().fg(theme.fg).bg(bg),
                 ),
                 Span::styled(
-                    trunc(&s.notes, 24),
+                    trunc(&s.notes, notes_max),
                     Style::default().fg(theme.muted).bg(bg),
                 ),
             ]))

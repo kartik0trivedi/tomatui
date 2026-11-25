@@ -75,9 +75,11 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let block = modal_block(" Session Note ", theme);
             let inner = block.inner(popup);
             f.render_widget(block, popup);
+            let max_w = (inner.width as usize).saturating_sub(4).max(8);
+            let visible = visible_input_tail(buf, max_w);
             let lines = vec![
                 Line::from(Span::styled(
-                    format!(" {}_", buf),
+                    format!(" {}_ ", visible),
                     Style::default().fg(theme.fg).bg(theme.highlight),
                 )),
                 Line::raw(""),
@@ -94,6 +96,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let block = modal_block(" Change Data Location (SQLite) ", theme);
             let inner = block.inner(popup);
             f.render_widget(block, popup);
+            let max_w = (inner.width as usize).saturating_sub(4).max(8);
+            let visible = visible_input_tail(buf, max_w);
             let lines = vec![
                 Line::from(Span::styled(
                     " Enter file or folder path (supports ~/, blank resets default):",
@@ -101,7 +105,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 )),
                 Line::raw(""),
                 Line::from(Span::styled(
-                    format!(" {}_", buf),
+                    format!(" {}_ ", visible),
                     Style::default().fg(theme.fg).bg(theme.highlight),
                 )),
                 Line::raw(""),
@@ -133,11 +137,13 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let inner = block.inner(popup);
             f.render_widget(block, popup);
 
+            let max_w = (inner.width as usize).saturating_sub(11).max(10);
+            let name_vis = visible_input_tail(name_buf, max_w);
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(" Name: ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(" {}_ ", name_buf),
+                        format!(" {}_ ", name_vis),
                         if *focus == 0 {
                             Style::default().fg(theme.fg).bg(theme.highlight)
                         } else {
@@ -199,17 +205,26 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 }
             };
 
+            let field_w = (inner.width as usize).saturating_sub(16).max(10);
+            let proj_display = if project_input.is_empty() {
+                "(unassigned)".to_string()
+            } else {
+                visible_input_tail(project_input, field_w)
+            };
+            let act_display = if activity_input.is_empty() {
+                "(none)".to_string()
+            } else {
+                visible_input_tail(activity_input, field_w)
+            };
+            let notes_display = visible_input_tail(notes_input, field_w);
+
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(" Project  : ", Style::default().fg(theme.muted)),
                     Span::styled(
                         format!(
                             " {}{} ",
-                            if project_input.is_empty() {
-                                "(unassigned)"
-                            } else {
-                                project_input
-                            },
+                            proj_display,
                             if *focus == 0 { "_" } else { "" }
                         ),
                         input_style(*focus == 0),
@@ -225,11 +240,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     Span::styled(
                         format!(
                             " {}{} ",
-                            if activity_input.is_empty() {
-                                "(none)"
-                            } else {
-                                activity_input
-                            },
+                            act_display,
                             if *focus == 1 { "_" } else { "" }
                         ),
                         input_style(*focus == 1),
@@ -250,7 +261,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(" Notes    : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(" {}{} ", notes_input, if *focus == 3 { "_" } else { "" }),
+                        format!(" {}{} ", notes_display, if *focus == 3 { "_" } else { "" }),
                         input_style(*focus == 3),
                     ),
                 ]));
@@ -308,6 +319,23 @@ fn modal_block<'a>(title: &'a str, theme: &Theme) -> Block<'a> {
         .style(Style::default().bg(theme.bg).fg(theme.fg))
 }
 
+/// Shows the tail of a text input so the latest typed characters and cursor remain visible
+/// while earlier characters scroll off to the left with a leading `…`.
+fn visible_input_tail(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        text.to_string()
+    } else if max_chars <= 1 {
+        chars.last().map(|c| c.to_string()).unwrap_or_default()
+    } else {
+        let start = chars.len() - (max_chars - 1);
+        let mut out = String::with_capacity(max_chars + 3);
+        out.push('…');
+        out.extend(&chars[start..]);
+        out
+    }
+}
+
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let w = width.min(area.width.saturating_sub(2));
     let h = height.min(area.height.saturating_sub(2));
@@ -317,4 +345,16 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         w,
         h,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_visible_input_tail_scrolls_left_when_exceeding_width() {
+        assert_eq!(visible_input_tail("short", 10), "short");
+        assert_eq!(visible_input_tail("0123456789", 10), "0123456789");
+        assert_eq!(visible_input_tail("0123456789abc", 10), "…456789abc");
+    }
 }

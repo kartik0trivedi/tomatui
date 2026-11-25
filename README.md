@@ -36,6 +36,7 @@ Cargo automatically downloads and compiles all Rust dependencies (including bund
 git clone https://github.com/kartik0trivedi/tomatui.git
 cd tomatui
 cargo install --path .
+cargo clean # optional: reclaims temporary build cache (~500 MB) without affecting the installed binary
 ```
 
 To update an existing installation after pulling changes:

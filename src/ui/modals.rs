@@ -139,19 +139,17 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
             let max_w = (inner.width as usize).saturating_sub(11).max(10);
             let name_vis = visible_input_tail(name_buf, max_w);
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(" Name: ", Style::default().fg(theme.muted)),
-                    Span::styled(
-                        format!(" {}_ ", name_vis),
-                        if *focus == 0 {
-                            Style::default().fg(theme.fg).bg(theme.highlight)
-                        } else {
-                            Style::default().fg(theme.fg)
-                        },
-                    ),
-                ]),
-            ];
+            let mut lines = vec![Line::from(vec![
+                Span::styled(" Name: ", Style::default().fg(theme.muted)),
+                Span::styled(
+                    format!(" {}_ ", name_vis),
+                    if *focus == 0 {
+                        Style::default().fg(theme.fg).bg(theme.highlight)
+                    } else {
+                        Style::default().fg(theme.fg)
+                    },
+                ),
+            ])];
             if *is_activity {
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
@@ -222,11 +220,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Line::from(vec![
                     Span::styled(" Project  : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(
-                            " {}{} ",
-                            proj_display,
-                            if *focus == 0 { "_" } else { "" }
-                        ),
+                        format!(" {}{} ", proj_display, if *focus == 0 { "_" } else { "" }),
                         input_style(*focus == 0),
                     ),
                 ]),
@@ -238,11 +232,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Line::from(vec![
                     Span::styled(" Activity : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(
-                            " {}{} ",
-                            act_display,
-                            if *focus == 1 { "_" } else { "" }
-                        ),
+                        format!(" {}{} ", act_display, if *focus == 1 { "_" } else { "" }),
                         input_style(*focus == 1),
                     ),
                 ]),

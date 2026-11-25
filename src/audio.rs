@@ -87,7 +87,11 @@ pub fn synthesize_chime(phase: PomodoroPhase) -> Vec<u8> {
         // Calming triad (C5 -> E5 -> G5)
         PomodoroPhase::LongBreak => (
             1.6,
-            &[(0.0, 0.20, 523.25), (0.20, 0.20, 659.25), (0.40, 1.20, 783.99)],
+            &[
+                (0.0, 0.20, 523.25),
+                (0.20, 0.20, 659.25),
+                (0.40, 1.20, 783.99),
+            ],
         ),
     };
 

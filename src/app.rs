@@ -260,7 +260,7 @@ impl App {
 
     pub fn on_tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
-        if self.tick_count % 4 == 0 {
+        if self.tick_count.is_multiple_of(4) {
             self.tick_second();
         }
         if self.status_ticks > 0 {
@@ -385,7 +385,12 @@ impl App {
                     s.notes,
                 )
             } else {
-                (String::new(), String::new(), SessionStatus::Completed, String::new())
+                (
+                    String::new(),
+                    String::new(),
+                    SessionStatus::Completed,
+                    String::new(),
+                )
             }
         } else {
             (
@@ -665,13 +670,11 @@ impl App {
                     focus: 0,
                 };
             }
-            KeyCode::Char(' ') => {
-                if self.projects_pane_focus == 1 {
-                    if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
-                        let id = act.id.clone();
-                        let _ = self.db.toggle_activity_completed(&id);
-                        self.refresh_data();
-                    }
+            KeyCode::Char(' ') if self.projects_pane_focus == 1 => {
+                if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
+                    let id = act.id.clone();
+                    let _ = self.db.toggle_activity_completed(&id);
+                    self.refresh_data();
                 }
             }
             KeyCode::Enter => {
@@ -710,20 +713,15 @@ impl App {
 
     fn handle_history_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                if !self.sessions.is_empty() {
-                    self.selected_session_idx = if self.selected_session_idx == 0 {
-                        self.sessions.len() - 1
-                    } else {
-                        self.selected_session_idx - 1
-                    };
-                }
+            KeyCode::Up | KeyCode::Char('k') if !self.sessions.is_empty() => {
+                self.selected_session_idx = if self.selected_session_idx == 0 {
+                    self.sessions.len() - 1
+                } else {
+                    self.selected_session_idx - 1
+                };
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if !self.sessions.is_empty() {
-                    self.selected_session_idx =
-                        (self.selected_session_idx + 1) % self.sessions.len();
-                }
+            KeyCode::Down | KeyCode::Char('j') if !self.sessions.is_empty() => {
+                self.selected_session_idx = (self.selected_session_idx + 1) % self.sessions.len();
             }
             KeyCode::Char('u') => {
                 self.history_unassigned_only = !self.history_unassigned_only;
@@ -865,7 +863,7 @@ impl App {
                 break_buf,
                 batches_buf,
             } => match key.code {
-                KeyCode::Esc => return,
+                KeyCode::Esc => (),
                 KeyCode::Tab | KeyCode::Right => {
                     *focus = (*focus + 1) % 3;
                     self.modal = modal;
@@ -878,19 +876,16 @@ impl App {
                     // Quick preset 1: 25m x 1
                     self.timer.set_plan(SessionPlan::new(25, 5, 1));
                     self.set_status("Plan: 25m × 1");
-                    return;
                 }
                 KeyCode::Char('b') => {
                     // Quick preset 2: 25m x 2
                     self.timer.set_plan(SessionPlan::new(25, 5, 2));
                     self.set_status("Plan: 25m × 2 (5m break)");
-                    return;
                 }
                 KeyCode::Char('c') => {
                     // Quick preset 3: 50m x 2
                     self.timer.set_plan(SessionPlan::new(50, 10, 2));
                     self.set_status("Plan: 50m × 2 (10m break)");
-                    return;
                 }
                 KeyCode::Backspace => {
                     let target = match *focus {
@@ -921,12 +916,11 @@ impl App {
                     let plan = SessionPlan::new(w, b, n);
                     self.timer.set_plan(plan);
                     self.set_status(format!("Plan set: {}", plan.label()));
-                    return;
                 }
                 _ => self.modal = modal,
             },
             ModalState::NoteEditor { buf } => match key.code {
-                KeyCode::Esc => return,
+                KeyCode::Esc => (),
                 KeyCode::Backspace => {
                     buf.pop();
                     self.modal = modal;
@@ -943,12 +937,11 @@ impl App {
                         self.refresh_data();
                     }
                     self.set_status("Note updated");
-                    return;
                 }
                 _ => self.modal = modal,
             },
             ModalState::DbPathEditor { buf } => match key.code {
-                KeyCode::Esc => return,
+                KeyCode::Esc => (),
                 KeyCode::Backspace => {
                     buf.pop();
                     self.modal = modal;
@@ -957,21 +950,18 @@ impl App {
                     buf.push(ch);
                     self.modal = modal;
                 }
-                KeyCode::Enter => {
-                    match self.db.relocate(buf) {
-                        Ok(new_db) => {
-                            let display = Database::display_short_path(new_db.path());
-                            self.db = new_db;
-                            let _ = self.db.save_config(&self.config);
-                            self.refresh_data();
-                            self.set_status(format!("Data moved to {}", display));
-                        }
-                        Err(err) => {
-                            self.set_status(format!("Could not change path: {}", err));
-                        }
+                KeyCode::Enter => match self.db.relocate(buf) {
+                    Ok(new_db) => {
+                        let display = Database::display_short_path(new_db.path());
+                        self.db = new_db;
+                        let _ = self.db.save_config(&self.config);
+                        self.refresh_data();
+                        self.set_status(format!("Data moved to {}", display));
                     }
-                    return;
-                }
+                    Err(err) => {
+                        self.set_status(format!("Could not change path: {}", err));
+                    }
+                },
                 _ => self.modal = modal,
             },
             ModalState::AddItem {
@@ -980,7 +970,7 @@ impl App {
                 est_buf,
                 focus,
             } => match key.code {
-                KeyCode::Esc => return,
+                KeyCode::Esc => (),
                 KeyCode::Tab | KeyCode::Down | KeyCode::Up if *is_activity => {
                     *focus = 1 - *focus;
                     self.modal = modal;
@@ -1016,7 +1006,6 @@ impl App {
                         }
                         self.refresh_data();
                     }
-                    return;
                 }
                 _ => self.modal = modal,
             },
@@ -1033,7 +1022,7 @@ impl App {
                 let is_history = session_id.is_some();
                 let max_focus = if is_history { 4 } else { 2 };
                 match key.code {
-                    KeyCode::Esc => return,
+                    KeyCode::Esc => (),
                     KeyCode::Tab => {
                         *focus = (*focus + 1) % max_focus;
                         self.modal = modal;
@@ -1143,7 +1132,6 @@ impl App {
                             self.set_status(format!("Context: {}", self.active_context_label()));
                         }
                         self.refresh_data();
-                        return;
                     }
                     _ => self.modal = modal,
                 }

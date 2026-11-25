@@ -18,10 +18,8 @@ use ratatui::{
 };
 
 pub fn render(f: &mut Frame, app: &mut App) {
-    let theme = Theme::from_choice_with_transparency(
-        app.config.theme,
-        app.config.transparent_background,
-    );
+    let theme =
+        Theme::from_choice_with_transparency(app.config.theme, app.config.transparent_background);
     let area = f.area();
 
     // Fill background (Color::Reset when transparent so Ghostty/terminal opacity shows through)
@@ -112,7 +110,10 @@ fn render_header(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     app.click_targets.tab_settings = Rect::new(right_x, nav_y, settings_w, 1);
 
     let line = Line::from(spans);
-    f.render_widget(Paragraph::new(line), Rect::new(area.x, nav_y, area.width, 1));
+    f.render_widget(
+        Paragraph::new(line),
+        Rect::new(area.x, nav_y, area.width, 1),
+    );
 
     let settings_line = if app.active_tab == ActiveTab::Settings {
         Line::from(Span::styled(
@@ -158,7 +159,9 @@ fn render_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             "↑↓ Move   Enter Start   p Project   t Plan   ? Help   q Quit  "
         }
         ActiveTab::Timer => "Space Pause   s Skip   p Project   n Note   Esc Stop   q Quit  ",
-        ActiveTab::Projects => "←→ Pane   a Add   Space Done   Enter Select   d Archive/Del   q Quit  ",
+        ActiveTab::Projects => {
+            "←→ Pane   a Add   Space Done   Enter Select   d Archive/Del   q Quit  "
+        }
         ActiveTab::History => "e/Enter Edit   u Unassigned   d Delete   ? Help   q Quit  ",
         ActiveTab::Stats => "r Cycle Range   ? Help   q Quit  ",
         ActiveTab::Settings => "1-4 Tabs   Esc Back   ↑↓ Select   ←→/Enter Edit   q Quit  ",

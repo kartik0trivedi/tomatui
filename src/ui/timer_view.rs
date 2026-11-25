@@ -41,7 +41,10 @@ fn render_opening(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         ])
         .split(area);
 
-    f.render_widget(Paragraph::new(digit_lines).alignment(Alignment::Center), v[1]);
+    f.render_widget(
+        Paragraph::new(digit_lines).alignment(Alignment::Center),
+        v[1],
+    );
 
     let row_w = 48u16.min(area.width.saturating_sub(4));
     let row_x = area.x + (area.width.saturating_sub(row_w)) / 2;
@@ -175,7 +178,10 @@ fn render_active(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .into_iter()
         .map(|l| Line::from(Span::styled(l, Style::default().fg(theme.fg))))
         .collect();
-    f.render_widget(Paragraph::new(digit_lines).alignment(Alignment::Center), v[2]);
+    f.render_widget(
+        Paragraph::new(digit_lines).alignment(Alignment::Center),
+        v[2],
+    );
 
     // Smooth sub-cell progress bar (8 fractional steps per character).
     // Full and empty cells both use full-cell backgrounds so filled and track heights match
@@ -308,10 +314,8 @@ fn blend_color(
     bg: ratatui::style::Color,
     alpha: f32,
 ) -> ratatui::style::Color {
-    if let (
-        ratatui::style::Color::Rgb(fr, fg_c, fb),
-        ratatui::style::Color::Rgb(br, bg_c, bb),
-    ) = (fg, bg)
+    if let (ratatui::style::Color::Rgb(fr, fg_c, fb), ratatui::style::Color::Rgb(br, bg_c, bb)) =
+        (fg, bg)
     {
         let mix = |a: u8, b: u8| -> u8 {
             ((a as f32) * alpha + (b as f32) * (1.0 - alpha))

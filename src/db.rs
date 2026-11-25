@@ -203,8 +203,7 @@ pub struct Database {
 
 impl Database {
     pub fn pointer_file_path() -> Option<PathBuf> {
-        ProjectDirs::from("com", "tomatui", "tomatui")
-            .map(|d| d.config_dir().join("db_path.txt"))
+        ProjectDirs::from("com", "tomatui", "tomatui").map(|d| d.config_dir().join("db_path.txt"))
     }
 
     pub fn platform_default_path() -> PathBuf {
@@ -661,7 +660,10 @@ impl Database {
         }
     }
 
-    pub fn toggle_activity_completed(&self, id_or_prefix: &str) -> rusqlite::Result<Option<Activity>> {
+    pub fn toggle_activity_completed(
+        &self,
+        id_or_prefix: &str,
+    ) -> rusqlite::Result<Option<Activity>> {
         let Some(act) = self.get_activity_by_id(id_or_prefix)? else {
             return Ok(None);
         };
@@ -776,7 +778,13 @@ impl Database {
             "UPDATE sessions
              SET project_id = ?1, activity_id = ?2, status = ?3, notes = ?4
              WHERE id = ?5",
-            params![new_proj, new_act, new_status.as_str(), new_notes, existing.id],
+            params![
+                new_proj,
+                new_act,
+                new_status.as_str(),
+                new_notes,
+                existing.id
+            ],
         )?;
         self.get_session_by_id(&existing.id)
     }
@@ -970,18 +978,20 @@ impl Database {
                 focus_mins: (secs + 30) / 60,
             })
             .collect();
-        by_project.sort_by(|a, b| b.focus_mins.cmp(&a.focus_mins));
+        by_project.sort_by_key(|b| std::cmp::Reverse(b.focus_mins));
 
         let mut by_activity: Vec<ActivityBreakdown> = act_map
             .into_iter()
-            .map(|((project, activity), (sessions, secs))| ActivityBreakdown {
-                project,
-                activity,
-                sessions,
-                focus_mins: (secs + 30) / 60,
-            })
+            .map(
+                |((project, activity), (sessions, secs))| ActivityBreakdown {
+                    project,
+                    activity,
+                    sessions,
+                    focus_mins: (secs + 30) / 60,
+                },
+            )
             .collect();
-        by_activity.sort_by(|a, b| b.focus_mins.cmp(&a.focus_mins));
+        by_activity.sort_by_key(|b| std::cmp::Reverse(b.focus_mins));
 
         Ok(StatsReport {
             range,

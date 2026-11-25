@@ -24,11 +24,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let filter_line = Line::from(vec![
         Span::styled(
-            if !app.history_unassigned_only {
-                "All Sessions"
-            } else {
-                "All Sessions"
-            },
+            "All Sessions",
             if !app.history_unassigned_only {
                 Style::default()
                     .fg(theme.primary)
@@ -72,7 +68,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
 
     let fixed_cols = 2 + 10 + 14 + 6 + 6 + 11 + 16 + 18;
-    let notes_max = (chunks[2].width as usize).saturating_sub(fixed_cols).max(16);
+    let notes_max = (chunks[2].width as usize)
+        .saturating_sub(fixed_cols)
+        .max(16);
 
     let items: Vec<ListItem> = app
         .sessions
@@ -110,7 +108,10 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     format!("{:<9} ", s.short_id()),
                     Style::default().fg(theme.muted).bg(bg),
                 ),
-                Span::styled(format!("{:<13} ", when), Style::default().fg(theme.fg).bg(bg)),
+                Span::styled(
+                    format!("{:<13} ", when),
+                    Style::default().fg(theme.fg).bg(bg),
+                ),
                 Span::styled(
                     format!("{:<5} ", phase_lbl),
                     Style::default().fg(phase_col).bg(bg),

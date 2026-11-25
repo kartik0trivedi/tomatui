@@ -60,7 +60,10 @@ impl SessionPlan {
 
     pub fn label(&self) -> String {
         if self.batches > 1 {
-            format!("{}m × {}  ·  {}m break", self.work_mins, self.batches, self.break_mins)
+            format!(
+                "{}m × {}  ·  {}m break",
+                self.work_mins, self.batches, self.break_mins
+            )
         } else {
             format!("{}m × 1", self.work_mins)
         }
@@ -201,7 +204,9 @@ impl PomodoroTimer {
                     self.elapsed_secs = 0;
                     (PomodoroPhase::Work, true)
                 } else {
-                    let next = if self.current_batch % config.long_break_interval == 0
+                    let next = if self
+                        .current_batch
+                        .is_multiple_of(config.long_break_interval)
                         && self.plan.batches > config.long_break_interval
                     {
                         PomodoroPhase::LongBreak

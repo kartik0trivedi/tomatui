@@ -325,8 +325,10 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     if json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&serde_json::json!({ "projects": projects }))
-                                .unwrap()
+                            serde_json::to_string_pretty(
+                                &serde_json::json!({ "projects": projects })
+                            )
+                            .unwrap()
                         );
                     } else if projects.is_empty() {
                         println!("No projects yet. Create one with `tomatui projects add <NAME>`.");
@@ -355,7 +357,10 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                         .set_project_archived(&project, true)
                         .map_err(|e| e.to_string())?;
                     if json {
-                        println!("{}", serde_json::json!({ "archived": ok, "project": project }));
+                        println!(
+                            "{}",
+                            serde_json::json!({ "archived": ok, "project": project })
+                        );
                     } else if ok {
                         println!("Archived project: {}", project);
                     } else {
@@ -384,8 +389,10 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     if json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&serde_json::json!({ "activities": acts }))
-                                .unwrap()
+                            serde_json::to_string_pretty(
+                                &serde_json::json!({ "activities": acts })
+                            )
+                            .unwrap()
                         );
                     } else if acts.is_empty() {
                         println!("No activities found.");
@@ -415,7 +422,12 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     if json {
                         println!("{}", serde_json::to_string_pretty(&act).unwrap());
                     } else {
-                        println!("Activity ready: {} / {} ({})", proj.name, act.name, &act.id[..8]);
+                        println!(
+                            "Activity ready: {} / {} ({})",
+                            proj.name,
+                            act.name,
+                            &act.id[..8]
+                        );
                     }
                 }
                 ActivityCmd::Done { id } => {
@@ -458,8 +470,10 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     if json {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&serde_json::json!({ "sessions": sessions }))
-                                .unwrap()
+                            serde_json::to_string_pretty(
+                                &serde_json::json!({ "sessions": sessions })
+                            )
+                            .unwrap()
                         );
                     } else if sessions.is_empty() {
                         println!("No sessions recorded.");
@@ -571,8 +585,9 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
             Ok(CliDispatch::Handled)
         }
         Some(Command::Stats { range, project }) => {
-            let r = StatsRange::parse_user(&range)
-                .ok_or_else(|| format!("Invalid range '{}'. Use today|week|month|year|all.", range))?;
+            let r = StatsRange::parse_user(&range).ok_or_else(|| {
+                format!("Invalid range '{}'. Use today|week|month|year|all.", range)
+            })?;
             let report = db
                 .get_stats(r, project.as_deref())
                 .map_err(|e| e.to_string())?;
@@ -594,7 +609,10 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                 if !report.by_project.is_empty() {
                     println!("\nBy project:");
                     for p in &report.by_project {
-                        println!("  {:<22} {:>3} sessions  {:>5}m", p.project, p.sessions, p.focus_mins);
+                        println!(
+                            "  {:<22} {:>3} sessions  {:>5}m",
+                            p.project, p.sessions, p.focus_mins
+                        );
                     }
                 }
             }

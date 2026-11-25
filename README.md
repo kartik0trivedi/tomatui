@@ -2,6 +2,13 @@
   <img src="assets/logo-light.svg" alt="tomatui — Pomodoro timer for your terminal and agents" width="760" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/kartik0trivedi/tomatui/actions/workflows/ci.yml"><img src="https://github.com/kartik0trivedi/tomatui/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/unsafe%20code-0%25%20(forbid)-brightgreen.svg" alt="Zero unsafe code" /></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/telemetry-0%25%20(100%25%20offline)-blueviolet.svg" alt="100% Offline" /></a>
+</p>
+
 A clean, offline-first Pomodoro TUI & agent-friendly CLI written in Rust, backed by SQLite (WAL mode).
 
 ## Features

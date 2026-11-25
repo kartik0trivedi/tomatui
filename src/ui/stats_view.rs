@@ -32,7 +32,10 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let metric = |label: &str, value: String, color| {
         Paragraph::new(vec![
-            Line::from(Span::styled(label.to_string(), Style::default().fg(theme.muted))),
+            Line::from(Span::styled(
+                label.to_string(),
+                Style::default().fg(theme.muted),
+            )),
             Line::from(Span::styled(
                 value,
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -102,9 +105,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(
         Paragraph::new(Span::styled(
             "Last 7 Days (minutes)",
-            Style::default()
-                .fg(theme.fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
         )),
         left_v[0],
     );
@@ -118,9 +119,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(
         Paragraph::new(Span::styled(
             format!("By Project ({})", r.range.label()),
-            Style::default()
-                .fg(theme.fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
         )),
         right_v[0],
     );
@@ -151,10 +150,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Line::from(vec![
                     Span::styled(format!("{:<16} ", p.project), Style::default().fg(theme.fg)),
                     Span::styled("━".repeat(filled), Style::default().fg(theme.primary)),
-                    Span::styled(
-                        "━".repeat(16 - filled),
-                        Style::default().fg(theme.border),
-                    ),
+                    Span::styled("━".repeat(16 - filled), Style::default().fg(theme.border)),
                     Span::styled(
                         format!("  {}m", p.focus_mins),
                         Style::default().fg(theme.muted),

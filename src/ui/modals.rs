@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             break_buf,
             batches_buf,
         } => {
-            let popup = centered_rect(54, 11, area);
+            let popup = centered_rect(58, 11, area);
             f.render_widget(Clear, popup);
             let block = modal_block(" Set Plan ", theme);
             let inner = block.inner(popup);
@@ -40,7 +40,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ]
             };
 
-            let mut row = Vec::new();
+            let mut row = vec![Span::raw(" ")];
             row.extend(field("Focus(m):", work_buf, *focus == 0));
             row.extend(field("Break(5):", break_buf, *focus == 1));
             row.extend(field("Batches(1):", batches_buf, *focus == 2));
@@ -91,7 +91,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             f.render_widget(Paragraph::new(lines), inner);
         }
         ModalState::DbPathEditor { buf } => {
-            let popup = centered_rect(66, 9, area);
+            let popup = centered_rect(68, 9, area);
             f.render_widget(Clear, popup);
             let block = modal_block(" Change Data Location (SQLite) ", theme);
             let inner = block.inner(popup);
@@ -212,7 +212,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 )));
             } else {
                 let space_vis = if space_buf.is_empty() {
-                    "(optional — team, client, org)".to_string()
+                    "(optional — e.g. Work, School)".to_string()
                 } else {
                     visible_input_tail(space_buf, max_w)
                 };
@@ -262,7 +262,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             } else {
                 " Select Space, Project & Activity "
             };
-            let popup = centered_rect(60, if is_history { 17 } else { 14 }, area);
+            let popup = centered_rect(64, if is_history { 17 } else { 14 }, area);
             f.render_widget(Clear, popup);
             let block = modal_block(title, theme);
             let inner = block.inner(popup);
@@ -312,7 +312,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     ),
                 ]),
                 Line::from(Span::styled(
-                    "            ↑↓ cycle existing or type new (team, client, org)",
+                    "            ↑↓ cycle existing or type new (optional)",
                     Style::default().fg(theme.muted),
                 )),
                 Line::raw(""),
@@ -371,7 +371,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn render_help(f: &mut Frame, theme: &Theme, area: Rect) {
-    let popup = centered_rect(64, 18, area);
+    let popup = centered_rect(72, 18, area);
     f.render_widget(Clear, popup);
     let block = modal_block(" Keyboard & Mouse Shortcuts ", theme);
     let inner = block.inner(popup);
@@ -384,7 +384,7 @@ fn render_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Line::from(" Timer:"),
         Line::from("   Enter / Space     Start, Pause, or Resume"),
         Line::from("   p                 Assign or change Space / Project / Activity"),
-        Line::from("   t                 Set Plan (presets or 3 numbers: focus, break, batches)"),
+        Line::from("   t                 Set Plan (presets or focus, break, batches)"),
         Line::from("   n / s / Esc       Edit note / Skip phase / Stop"),
         Line::raw(""),
         Line::from(" Projects: ←→ panes · a Add · e Edit · Space Done · d×2 Del"),

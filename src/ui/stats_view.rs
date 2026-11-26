@@ -174,13 +174,15 @@ pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             .max()
             .unwrap_or(1)
             .max(1);
+        let bar_w = (right_v[1].width as usize).saturating_sub(26).clamp(6, 16);
         let lines: Vec<Line> = r
             .by_project
             .iter()
             .take(8)
             .map(|p| {
-                let filled = ((p.focus_mins as f64 / max_mins as f64) * 14.0).round() as usize;
-                let filled = filled.clamp(1, 14);
+                let filled =
+                    ((p.focus_mins as f64 / max_mins as f64) * bar_w as f64).round() as usize;
+                let filled = filled.clamp(1, bar_w);
                 let label = if app.stats_space_idx == 0 {
                     match p.space.as_deref().filter(|s| !s.is_empty()) {
                         Some(sp) => format!("{} · {}", sp, p.project),
@@ -195,7 +197,10 @@ pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                         Style::default().fg(theme.fg),
                     ),
                     Span::styled("━".repeat(filled), Style::default().fg(theme.primary)),
-                    Span::styled("━".repeat(14 - filled), Style::default().fg(theme.border)),
+                    Span::styled(
+                        "━".repeat(bar_w - filled),
+                        Style::default().fg(theme.border),
+                    ),
                     Span::styled(
                         format!("  {}m", p.focus_mins),
                         Style::default().fg(theme.muted),

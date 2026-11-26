@@ -421,8 +421,8 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     buf
                 }
             };
-            let payload: ImportPayload = serde_json::from_str(&raw)
-                .map_err(|e| format!("Invalid import JSON: {}", e))?;
+            let payload: ImportPayload =
+                serde_json::from_str(&raw).map_err(|e| format!("Invalid import JSON: {}", e))?;
             let summary = db
                 .bulk_import(payload, dry_run)
                 .map_err(|e| e.to_string())?;

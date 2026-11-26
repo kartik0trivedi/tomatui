@@ -689,11 +689,7 @@ impl Database {
         self.find_project_by_name_or_id(id)
     }
 
-    pub fn set_project_space(
-        &self,
-        query: &str,
-        space: Option<&str>,
-    ) -> rusqlite::Result<bool> {
+    pub fn set_project_space(&self, query: &str, space: Option<&str>) -> rusqlite::Result<bool> {
         let Some(proj) = self.find_project_by_name_or_id(query)? else {
             return Ok(false);
         };
@@ -1385,7 +1381,11 @@ impl Database {
                 if pname.is_empty() {
                     continue;
                 }
-                let sp_opt = proj.space.as_deref().map(str::trim).filter(|s| !s.is_empty());
+                let sp_opt = proj
+                    .space
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
                 if let Some(sp) = sp_opt {
                     let stored = self.add_space(sp)?;
                     push_unique(&mut seen_spaces, &stored);

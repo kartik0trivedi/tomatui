@@ -307,9 +307,9 @@ impl App {
             self.stats_report = report;
         }
         let space_filter = self.active_stats_space().map(ToString::to_string);
-        if let Ok(filtered) =
-            self.db
-                .get_stats(self.stats_range, None, space_filter.as_deref())
+        if let Ok(filtered) = self
+            .db
+            .get_stats(self.stats_range, None, space_filter.as_deref())
         {
             self.stats_view_report = filtered;
         }
@@ -1499,7 +1499,10 @@ impl App {
                                     }
                                     Ok(None) => {}
                                     Err(e) => {
-                                        self.set_status(format!("Could not update activity: {}", e));
+                                        self.set_status(format!(
+                                            "Could not update activity: {}",
+                                            e
+                                        ));
                                     }
                                 }
                             } else if let Some(proj) =

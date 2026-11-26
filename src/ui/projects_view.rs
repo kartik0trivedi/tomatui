@@ -121,7 +121,11 @@ pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let proj_scope = app.selected_projects_space().unwrap_or("All");
     f.render_widget(
         Paragraph::new(Span::styled(
-            format!("Projects · {} ({})", proj_scope, app.filtered_projects.len()),
+            format!(
+                "Projects · {} ({})",
+                proj_scope,
+                app.filtered_projects.len()
+            ),
             title_style(app.projects_pane_focus == 1),
         )),
         proj_chunks[0],
@@ -163,7 +167,11 @@ pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 let line = Line::from(vec![
                     Span::styled(marker, Style::default().fg(theme.primary).bg(bg)),
                     Span::styled(
-                        format!("{:<width$}", trunc(&label, proj_name_w), width = proj_name_w),
+                        format!(
+                            "{:<width$}",
+                            trunc(&label, proj_name_w),
+                            width = proj_name_w
+                        ),
                         Style::default().fg(theme.fg).bg(bg),
                     ),
                     Span::styled(

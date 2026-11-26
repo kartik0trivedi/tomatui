@@ -47,7 +47,11 @@ pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         filter_spans.push(Span::raw(" "));
     };
 
-    push_pill("All", 0, !app.history_unassigned_only && app.history_space_idx == 0);
+    push_pill(
+        "All",
+        0,
+        !app.history_unassigned_only && app.history_space_idx == 0,
+    );
     for (idx, sp) in app.spaces.iter().enumerate() {
         push_pill(
             sp,

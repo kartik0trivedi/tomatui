@@ -190,4 +190,28 @@ fn test_all_views_and_modals_render_without_panic() {
     terminal.draw(|f| ui::render(f, &mut app)).unwrap();
     app.on_key(key(KeyCode::Left));
     assert_eq!(app.active_stats_space(), Some("School"));
+
+    // 10. History tab: left/right arrows filter by Space and 'd' requires double-press confirm
+    app.on_key(key(KeyCode::Char('3')));
+    assert_eq!(app.active_history_space(), None);
+    app.on_key(key(KeyCode::Right));
+    assert_eq!(app.active_history_space(), Some("School"));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Left));
+    assert_eq!(app.active_history_space(), None);
+    let initial_sessions = app.sessions.len();
+    assert!(initial_sessions >= 1);
+    app.on_key(key(KeyCode::Char('d')));
+    assert!(app.pending_delete.is_some());
+    assert_eq!(app.sessions.len(), initial_sessions); // Not deleted on first 'd'
+    app.on_key(key(KeyCode::Char('d')));
+    assert!(app.pending_delete.is_none());
+    assert_eq!(app.sessions.len(), initial_sessions - 1); // Deleted on second 'd'
+
+    // 11. Settings row 10 responds to 'e' (universal Edit)
+    app.on_key(key(KeyCode::Char(',')));
+    app.settings_idx = 10;
+    app.on_key(key(KeyCode::Char('e')));
+    assert!(matches!(app.modal, ModalState::DbPathEditor { .. }));
+    app.on_key(key(KeyCode::Esc));
 }

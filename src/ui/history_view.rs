@@ -7,11 +7,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
     Frame,
 };
 
-pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -22,30 +22,56 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ])
         .split(area);
 
-    let filter_line = Line::from(vec![
-        Span::styled(
-            "All Sessions",
-            if !app.history_unassigned_only {
-                Style::default()
-                    .fg(theme.primary)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.muted)
-            },
-        ),
-        Span::styled("    ", Style::default()),
-        Span::styled(
-            format!("Unassigned ({}) [u]", app.stats_report.unassigned_sessions),
-            if app.history_unassigned_only {
-                Style::default()
-                    .fg(theme.warning)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.muted)
-            },
-        ),
-    ]);
-    f.render_widget(Paragraph::new(filter_line), chunks[0]);
+    // Space filter bar matching Stats: [All] School Work ...  |  Unassigned (N) [u]
+    app.click_targets.history_space_pills.clear();
+    let mut filter_spans = vec![Span::styled("Space: ", Style::default().fg(theme.muted))];
+    let mut cursor_x = chunks[0].x + 7;
+    let bar_y = chunks[0].y;
+
+    let mut push_pill = |label: &str, idx: usize, active: bool| {
+        let text = format!(" {} ", label);
+        let w = text.chars().count() as u16;
+        app.click_targets
+            .history_space_pills
+            .push((Rect::new(cursor_x, bar_y, w, 1), idx));
+        cursor_x = cursor_x.saturating_add(w + 1);
+        let style = if active {
+            Style::default()
+                .fg(theme.button_fg())
+                .bg(theme.primary)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.muted)
+        };
+        filter_spans.push(Span::styled(text, style));
+        filter_spans.push(Span::raw(" "));
+    };
+
+    push_pill("All", 0, !app.history_unassigned_only && app.history_space_idx == 0);
+    for (idx, sp) in app.spaces.iter().enumerate() {
+        push_pill(
+            sp,
+            idx + 1,
+            !app.history_unassigned_only && app.history_space_idx == idx + 1,
+        );
+    }
+
+    filter_spans.push(Span::styled("  │  ", Style::default().fg(theme.border)));
+    cursor_x = cursor_x.saturating_add(5);
+    let unass_text = format!("Unassigned ({}) [u]", app.stats_report.unassigned_sessions);
+    let unass_w = unass_text.chars().count() as u16;
+    app.click_targets.history_unassigned_btn = Rect::new(cursor_x, bar_y, unass_w, 1);
+    filter_spans.push(Span::styled(
+        unass_text,
+        if app.history_unassigned_only {
+            Style::default()
+                .fg(theme.warning)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.muted)
+        },
+    ));
+    f.render_widget(Paragraph::new(Line::from(filter_spans)), chunks[0]);
 
     let header = Line::from(Span::styled(
         format!(
@@ -150,7 +176,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         })
         .collect();
 
-    f.render_widget(List::new(items), chunks[2]);
+    app.click_targets.history_list_area = chunks[2];
+    let mut state = ListState::default().with_selected(Some(app.selected_session_idx));
+    f.render_stateful_widget(List::new(items), chunks[2], &mut state);
 }
 
 fn trunc(s: &str, max: usize) -> String {

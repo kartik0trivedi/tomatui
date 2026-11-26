@@ -206,6 +206,10 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                         },
                     ),
                 ]));
+                lines.push(Line::from(Span::styled(
+                    "         ↑↓/←→ adjust or type number",
+                    Style::default().fg(theme.muted),
+                )));
             } else {
                 let space_vis = if space_buf.is_empty() {
                     "(optional — team, client, org)".to_string()
@@ -230,7 +234,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ]));
                 if !app.spaces.is_empty() {
                     lines.push(Line::from(Span::styled(
-                        "         ←→ cycle existing spaces or type new",
+                        "         ↑↓/←→ cycle existing spaces or type new",
                         Style::default().fg(theme.muted),
                     )));
                 }
@@ -258,7 +262,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             } else {
                 " Select Space, Project & Activity "
             };
-            let popup = centered_rect(60, if is_history { 16 } else { 13 }, area);
+            let popup = centered_rect(60, if is_history { 17 } else { 14 }, area);
             f.render_widget(Clear, popup);
             let block = modal_block(title, theme);
             let inner = block.inner(popup);
@@ -331,6 +335,10 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                         input_style(*focus == 2),
                     ),
                 ]),
+                Line::from(Span::styled(
+                    "            ↑↓ cycle existing or type new",
+                    Style::default().fg(theme.muted),
+                )),
             ];
 
             if is_history {
@@ -363,7 +371,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn render_help(f: &mut Frame, theme: &Theme, area: Rect) {
-    let popup = centered_rect(58, 16, area);
+    let popup = centered_rect(64, 18, area);
     f.render_widget(Clear, popup);
     let block = modal_block(" Keyboard & Mouse Shortcuts ", theme);
     let inner = block.inner(popup);
@@ -379,9 +387,10 @@ fn render_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Line::from("   t                 Set Plan (presets or 3 numbers: focus, break, batches)"),
         Line::from("   n / s / Esc       Edit note / Skip phase / Stop"),
         Line::raw(""),
-        Line::from(" Stats  :  ←→ filter by Space [All, spaces] · r cycle range"),
-        Line::from(" History:  e or Enter to edit any past session · u for unassigned"),
-        Line::from(" CLI    :  tomatui PROJECT --25 --2   |   tomatui stats --json"),
+        Line::from(" Projects: ←→ panes · a Add · e Edit · Space Done · d×2 Del"),
+        Line::from(" History : ←→ Space · e/Enter Edit · u Unassigned · d×2 Del"),
+        Line::from(" Stats   : ←→ Space [All, spaces] · r Cycle Range"),
+        Line::from(" CLI     : tomatui guide --json  |  tomatui import --json"),
         Line::raw(""),
         Line::from(Span::styled(
             " Press Esc, ?, or Enter to close",

@@ -8,8 +8,7 @@ use ratatui::{
     Frame,
 };
 
-pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let r = &app.stats_view_report;
+pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -22,29 +21,38 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .split(area);
 
     // Space filter bar: [All]  Client  Personal  School  Work   (◀ ▶)
+    app.click_targets.stats_space_pills.clear();
     let mut filter_spans = vec![Span::styled("Space: ", Style::default().fg(theme.muted))];
-    let pill = |label: &str, active: bool| -> Span<'static> {
-        if active {
-            Span::styled(
-                format!(" {} ", label),
-                Style::default()
-                    .fg(theme.button_fg())
-                    .bg(theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            )
+    let mut cursor_x = rows[0].x + 7;
+    let bar_y = rows[0].y;
+    let mut push_pill = |label: &str, idx: usize, active: bool| {
+        let text = format!(" {} ", label);
+        let w = text.chars().count() as u16;
+        app.click_targets
+            .stats_space_pills
+            .push((Rect::new(cursor_x, bar_y, w, 1), idx));
+        cursor_x = cursor_x.saturating_add(w + 1);
+        let style = if active {
+            Style::default()
+                .fg(theme.button_fg())
+                .bg(theme.primary)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Span::styled(format!(" {} ", label), Style::default().fg(theme.muted))
-        }
-    };
-    filter_spans.push(pill("All", app.stats_space_idx == 0));
-    for (idx, sp) in app.spaces.iter().enumerate() {
+            Style::default().fg(theme.muted)
+        };
+        filter_spans.push(Span::styled(text, style));
         filter_spans.push(Span::raw(" "));
-        filter_spans.push(pill(sp, app.stats_space_idx == idx + 1));
+    };
+    push_pill("All", 0, app.stats_space_idx == 0);
+    for (idx, sp) in app.spaces.iter().enumerate() {
+        push_pill(sp, idx + 1, app.stats_space_idx == idx + 1);
     }
     if !app.spaces.is_empty() {
-        filter_spans.push(Span::styled("   ←→", Style::default().fg(theme.muted)));
+        filter_spans.push(Span::styled("  ←→", Style::default().fg(theme.muted)));
     }
     f.render_widget(Paragraph::new(Line::from(filter_spans)), rows[0]);
+
+    let r = &app.stats_view_report;
 
     let cards = Layout::default()
         .direction(Direction::Horizontal)

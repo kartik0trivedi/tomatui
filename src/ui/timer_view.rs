@@ -59,7 +59,7 @@ fn render_opening(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     };
     let ctx_label = app.active_context_label();
     let proj_line = Line::from(vec![
-        Span::styled("  Project   ", Style::default().fg(theme.muted).bg(proj_bg)),
+        Span::styled("  Focus     ", Style::default().fg(theme.muted).bg(proj_bg)),
         Span::styled(
             format!("{:<29}", truncate(&ctx_label, 29)),
             Style::default()

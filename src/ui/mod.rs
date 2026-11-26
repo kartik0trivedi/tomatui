@@ -156,15 +156,15 @@ fn render_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let hints = match app.active_tab {
         ActiveTab::Timer if app.timer.status == TimerStatus::Idle => {
-            "↑↓ Move   Enter Start   p Project   t Plan   ? Help   q Quit  "
+            "↑↓ Move   Enter Start   p Focus   t Plan   ? Help   q Quit  "
         }
-        ActiveTab::Timer => "Space Pause   s Skip   p Project   n Note   Esc Stop   q Quit  ",
+        ActiveTab::Timer => "Space Pause   s Skip   p Focus   n Note   Esc Stop   q Quit  ",
         ActiveTab::Projects => {
             "←→ Pane   a Add   e Edit   Space Done   Enter Select   d Del   q Quit  "
         }
-        ActiveTab::History => "e/Enter Edit   u Unassigned   d Delete   ? Help   q Quit  ",
+        ActiveTab::History => "←→ Space   e/Enter Edit   u Unassigned   d Del   ? Help   q Quit  ",
         ActiveTab::Stats => "←→ Space   r Cycle Range   ? Help   q Quit  ",
-        ActiveTab::Settings => "1-4 Tabs   Esc Back   ↑↓ Select   ←→/Enter Edit   q Quit  ",
+        ActiveTab::Settings => "1-4 Tabs   Esc Back   ↑↓ Select   ←→/Enter/e Edit   q Quit  ",
     };
 
     let footer_y = area.y + 1;

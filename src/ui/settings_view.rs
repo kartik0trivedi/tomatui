@@ -5,11 +5,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
     Frame,
 };
 
-pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -56,7 +56,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         ("Color Theme", format!("◀ {} ▶", cfg.theme.name())),
         (
             "Data Location (SQLite)",
-            format!("{}  (Enter to change)", db_display),
+            format!("{}  (Enter/e to change)", db_display),
         ),
     ];
 
@@ -88,7 +88,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         })
         .collect();
 
-    f.render_widget(List::new(items), chunks[1]);
+    app.click_targets.settings_list_area = chunks[1];
+    let mut state = ListState::default().with_selected(Some(app.settings_idx));
+    f.render_stateful_widget(List::new(items), chunks[1], &mut state);
 }
 
 fn bool_str(v: bool) -> String {

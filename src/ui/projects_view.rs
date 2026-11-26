@@ -4,11 +4,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
     Frame,
 };
 
-pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+pub fn render(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .margin(2)
@@ -103,7 +103,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             ),
         ])));
     }
-    f.render_widget(List::new(space_items), space_chunks[1]);
+    app.click_targets.projects_space_area = space_chunks[1];
+    let mut space_state = ListState::default().with_selected(Some(app.selected_space_idx));
+    f.render_stateful_widget(List::new(space_items), space_chunks[1], &mut space_state);
 
     // Divider 1
     let div1: Vec<Line> = (0..cols[1].height)
@@ -125,12 +127,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         proj_chunks[0],
     );
 
+    app.click_targets.projects_list_area = proj_chunks[1];
     if app.filtered_projects.is_empty() {
+        let hint = if app.projects_pane_focus == 1 {
+            "No projects. Press 'a' to add one."
+        } else {
+            "No projects. Switch here (→) & press 'a'."
+        };
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "No projects. Switch here (→) & press 'a'.",
-                Style::default().fg(theme.muted),
-            )),
+            Paragraph::new(Span::styled(hint, Style::default().fg(theme.muted))),
             proj_chunks[1],
         );
     } else {
@@ -169,7 +174,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ListItem::new(line)
             })
             .collect();
-        f.render_widget(List::new(items), proj_chunks[1]);
+        let mut proj_state = ListState::default().with_selected(Some(app.selected_project_idx));
+        f.render_stateful_widget(List::new(items), proj_chunks[1], &mut proj_state);
     }
 
     // Divider 2
@@ -200,12 +206,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         act_chunks[0],
     );
 
+    app.click_targets.projects_act_area = act_chunks[1];
     if app.project_activities.is_empty() {
+        let hint = if app.projects_pane_focus == 2 {
+            "No activities. Press 'a' to add one."
+        } else {
+            "No activities. Switch here (→) & press 'a'."
+        };
         f.render_widget(
-            Paragraph::new(Span::styled(
-                "No activities. Switch here (→) & press 'a'.",
-                Style::default().fg(theme.muted),
-            )),
+            Paragraph::new(Span::styled(hint, Style::default().fg(theme.muted))),
             act_chunks[1],
         );
     } else {
@@ -249,7 +258,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ListItem::new(line)
             })
             .collect();
-        f.render_widget(List::new(items), act_chunks[1]);
+        let mut act_state = ListState::default().with_selected(Some(app.selected_activity_idx));
+        f.render_stateful_widget(List::new(items), act_chunks[1], &mut act_state);
     }
 }
 

@@ -68,6 +68,14 @@ pub enum ModalState {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingDelete {
+    Space(String),
+    Project(String),
+    Activity(String),
+    Session(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ClickTargets {
     pub tab_timer: Rect,
@@ -80,6 +88,14 @@ pub struct ClickTargets {
     pub opening_start_btn: Rect,
     pub active_pause_btn: Rect,
     pub active_stop_btn: Rect,
+    pub stats_space_pills: Vec<(Rect, usize)>,
+    pub history_space_pills: Vec<(Rect, usize)>,
+    pub history_unassigned_btn: Rect,
+    pub history_list_area: Rect,
+    pub projects_space_area: Rect,
+    pub projects_list_area: Rect,
+    pub projects_act_area: Rect,
+    pub settings_list_area: Rect,
 }
 
 pub struct App {
@@ -113,6 +129,7 @@ pub struct App {
 
     pub sessions: Vec<SessionRecord>,
     pub selected_session_idx: usize,
+    pub history_space_idx: usize, // 0 = All, 1..=spaces.len() = specific space
     pub history_unassigned_only: bool,
 
     pub stats_range: StatsRange,
@@ -121,6 +138,7 @@ pub struct App {
     pub stats_view_report: StatsReport,
 
     pub settings_idx: usize,
+    pub pending_delete: Option<PendingDelete>,
     pub status_message: Option<String>,
     pub status_ticks: usize,
     pub tick_count: u32,
@@ -174,12 +192,14 @@ impl App {
             projects_pane_focus: 0,
             sessions: Vec::new(),
             selected_session_idx: 0,
+            history_space_idx: 0,
             history_unassigned_only: false,
             stats_range: StatsRange::Week,
             stats_space_idx: 0,
             stats_report,
             stats_view_report,
             settings_idx: 0,
+            pending_delete: None,
             status_message: None,
             status_ticks: 0,
             tick_count: 0,
@@ -204,6 +224,16 @@ impl App {
         }
     }
 
+    pub fn active_history_space(&self) -> Option<&str> {
+        if self.history_space_idx == 0 {
+            None
+        } else {
+            self.spaces
+                .get(self.history_space_idx - 1)
+                .map(String::as_str)
+        }
+    }
+
     pub fn active_stats_space(&self) -> Option<&str> {
         if self.stats_space_idx == 0 {
             None
@@ -218,6 +248,9 @@ impl App {
         self.spaces = self.db.list_spaces().unwrap_or_default();
         if self.selected_space_idx > self.spaces.len() {
             self.selected_space_idx = 0;
+        }
+        if self.history_space_idx > self.spaces.len() {
+            self.history_space_idx = 0;
         }
         if self.stats_space_idx > self.spaces.len() {
             self.stats_space_idx = 0;
@@ -252,9 +285,15 @@ impl App {
             self.selected_activity_idx = self.project_activities.len().saturating_sub(1);
         }
 
+        let hist_space = if self.history_unassigned_only {
+            None
+        } else {
+            self.active_history_space().map(ToString::to_string)
+        };
         self.sessions = self
             .db
             .list_sessions(&SessionFilter {
+                space: hist_space,
                 unassigned_only: self.history_unassigned_only,
                 limit: Some(100),
                 ..Default::default()
@@ -514,34 +553,109 @@ impl App {
         let hit = |r: Rect| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height;
 
         if hit(self.click_targets.tab_timer) {
-            self.active_tab = ActiveTab::Timer;
+            self.switch_tab(ActiveTab::Timer);
         } else if hit(self.click_targets.tab_projects) {
-            self.active_tab = ActiveTab::Projects;
+            self.switch_tab(ActiveTab::Projects);
             self.refresh_data();
         } else if hit(self.click_targets.tab_history) {
-            self.active_tab = ActiveTab::History;
+            self.switch_tab(ActiveTab::History);
             self.refresh_data();
         } else if hit(self.click_targets.tab_stats) {
-            self.active_tab = ActiveTab::Stats;
+            self.switch_tab(ActiveTab::Stats);
             self.refresh_data();
         } else if hit(self.click_targets.tab_settings) {
-            self.active_tab = ActiveTab::Settings;
-        } else if self.active_tab == ActiveTab::Timer {
-            if self.timer.status == TimerStatus::Idle {
-                if hit(self.click_targets.opening_project_row) {
-                    self.opening_focus = 0;
-                    self.open_context_picker(None);
-                } else if hit(self.click_targets.opening_plan_row) {
-                    self.opening_focus = 1;
-                    self.open_plan_modal();
-                } else if hit(self.click_targets.opening_start_btn) {
-                    self.opening_focus = 2;
-                    self.start_focus_session();
+            self.switch_tab(ActiveTab::Settings);
+        } else {
+            self.pending_delete = None;
+            match self.active_tab {
+                ActiveTab::Timer => {
+                    if self.timer.status == TimerStatus::Idle {
+                        if hit(self.click_targets.opening_project_row) {
+                            self.opening_focus = 0;
+                            self.open_context_picker(None);
+                        } else if hit(self.click_targets.opening_plan_row) {
+                            self.opening_focus = 1;
+                            self.open_plan_modal();
+                        } else if hit(self.click_targets.opening_start_btn) {
+                            self.opening_focus = 2;
+                            self.start_focus_session();
+                        }
+                    } else if hit(self.click_targets.active_pause_btn) {
+                        self.timer.toggle_pause();
+                    } else if hit(self.click_targets.active_stop_btn) {
+                        self.stop_active_session();
+                    }
                 }
-            } else if hit(self.click_targets.active_pause_btn) {
-                self.timer.toggle_pause();
-            } else if hit(self.click_targets.active_stop_btn) {
-                self.stop_active_session();
+                ActiveTab::Projects => {
+                    if hit(self.click_targets.projects_space_area) {
+                        self.projects_pane_focus = 0;
+                        let idx = (row - self.click_targets.projects_space_area.y) as usize;
+                        if idx <= self.spaces.len() {
+                            self.selected_space_idx = idx;
+                            self.selected_project_idx = 0;
+                            self.selected_activity_idx = 0;
+                            self.refresh_data();
+                        }
+                    } else if hit(self.click_targets.projects_list_area) {
+                        self.projects_pane_focus = 1;
+                        let idx = (row - self.click_targets.projects_list_area.y) as usize;
+                        if idx < self.filtered_projects.len() {
+                            self.selected_project_idx = idx;
+                            self.selected_activity_idx = 0;
+                            self.refresh_data();
+                        }
+                    } else if hit(self.click_targets.projects_act_area) {
+                        self.projects_pane_focus = 2;
+                        let idx = (row - self.click_targets.projects_act_area.y) as usize;
+                        if idx < self.project_activities.len() {
+                            self.selected_activity_idx = idx;
+                        }
+                    }
+                }
+                ActiveTab::History => {
+                    if hit(self.click_targets.history_unassigned_btn) {
+                        self.history_unassigned_only = !self.history_unassigned_only;
+                        if self.history_unassigned_only {
+                            self.history_space_idx = 0;
+                        }
+                        self.selected_session_idx = 0;
+                        self.refresh_data();
+                    } else if let Some(&(_, idx)) = self
+                        .click_targets
+                        .history_space_pills
+                        .iter()
+                        .find(|(r, _)| hit(*r))
+                    {
+                        self.history_unassigned_only = false;
+                        self.history_space_idx = idx;
+                        self.selected_session_idx = 0;
+                        self.refresh_data();
+                    } else if hit(self.click_targets.history_list_area) {
+                        let idx = (row - self.click_targets.history_list_area.y) as usize;
+                        if idx < self.sessions.len() {
+                            self.selected_session_idx = idx;
+                        }
+                    }
+                }
+                ActiveTab::Stats => {
+                    if let Some(&(_, idx)) = self
+                        .click_targets
+                        .stats_space_pills
+                        .iter()
+                        .find(|(r, _)| hit(*r))
+                    {
+                        self.stats_space_idx = idx;
+                        self.refresh_data();
+                    }
+                }
+                ActiveTab::Settings => {
+                    if hit(self.click_targets.settings_list_area) {
+                        let idx = (row - self.click_targets.settings_list_area.y) as usize;
+                        if idx < 11 {
+                            self.settings_idx = idx;
+                        }
+                    }
+                }
             }
         }
     }
@@ -554,8 +668,14 @@ impl App {
         }
 
         if !matches!(self.modal, ModalState::None) {
+            self.pending_delete = None;
             self.handle_modal_key(key);
             return;
+        }
+
+        // Any key other than 'd' cancels a pending delete confirmation
+        if key.code != KeyCode::Char('d') && self.pending_delete.is_some() {
+            self.pending_delete = None;
         }
 
         // Global navigation keys (never conflict with sub-view filters!)
@@ -866,27 +986,58 @@ impl App {
             KeyCode::Char('d') => match self.projects_pane_focus {
                 0 => {
                     if let Some(sp) = self.selected_projects_space().map(ToString::to_string) {
-                        let _ = self.db.delete_space(&sp);
-                        self.selected_space_idx = 0;
-                        self.set_status(format!("Removed space: {}", sp));
-                        self.refresh_data();
+                        let target = PendingDelete::Space(sp.clone());
+                        if self.pending_delete.as_ref() == Some(&target) {
+                            self.pending_delete = None;
+                            let _ = self.db.delete_space(&sp);
+                            self.selected_space_idx = 0;
+                            self.set_status(format!("Removed space: {}", sp));
+                            self.refresh_data();
+                        } else {
+                            self.pending_delete = Some(target);
+                            self.set_status(format!(
+                                "Press 'd' again to remove space '{}' (projects kept)",
+                                sp
+                            ));
+                        }
                     }
                 }
                 1 => {
                     if let Some(proj) = self.filtered_projects.get(self.selected_project_idx) {
                         let id = proj.id.clone();
                         let name = proj.name.clone();
-                        let _ = self.db.set_project_archived(&id, true);
-                        self.set_status(format!("Archived project: {}", name));
-                        self.refresh_data();
+                        let target = PendingDelete::Project(id.clone());
+                        if self.pending_delete.as_ref() == Some(&target) {
+                            self.pending_delete = None;
+                            let _ = self.db.set_project_archived(&id, true);
+                            self.set_status(format!("Archived project: {}", name));
+                            self.refresh_data();
+                        } else {
+                            self.pending_delete = Some(target);
+                            self.set_status(format!(
+                                "Press 'd' again to archive project '{}'",
+                                name
+                            ));
+                        }
                     }
                 }
                 _ => {
                     if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
                         let id = act.id.clone();
-                        let _ = self.db.delete_activity(&id);
-                        self.set_status("Deleted activity");
-                        self.refresh_data();
+                        let name = act.name.clone();
+                        let target = PendingDelete::Activity(id.clone());
+                        if self.pending_delete.as_ref() == Some(&target) {
+                            self.pending_delete = None;
+                            let _ = self.db.delete_activity(&id);
+                            self.set_status(format!("Deleted activity: {}", name));
+                            self.refresh_data();
+                        } else {
+                            self.pending_delete = Some(target);
+                            self.set_status(format!(
+                                "Press 'd' again to delete activity '{}'",
+                                name
+                            ));
+                        }
                     }
                 }
             },
@@ -895,7 +1046,21 @@ impl App {
     }
 
     fn handle_history_key(&mut self, key: KeyEvent) {
+        let total_filters = self.spaces.len() + 1;
         match key.code {
+            KeyCode::Right | KeyCode::Char('l') if total_filters > 1 => {
+                self.history_unassigned_only = false;
+                self.history_space_idx = (self.history_space_idx + 1) % total_filters;
+                self.selected_session_idx = 0;
+                self.refresh_data();
+            }
+            KeyCode::Left | KeyCode::Char('h') if total_filters > 1 => {
+                self.history_unassigned_only = false;
+                self.history_space_idx =
+                    (self.history_space_idx + total_filters - 1) % total_filters;
+                self.selected_session_idx = 0;
+                self.refresh_data();
+            }
             KeyCode::Up | KeyCode::Char('k') if !self.sessions.is_empty() => {
                 self.selected_session_idx = if self.selected_session_idx == 0 {
                     self.sessions.len() - 1
@@ -908,6 +1073,9 @@ impl App {
             }
             KeyCode::Char('u') => {
                 self.history_unassigned_only = !self.history_unassigned_only;
+                if self.history_unassigned_only {
+                    self.history_space_idx = 0;
+                }
                 self.selected_session_idx = 0;
                 self.refresh_data();
             }
@@ -920,9 +1088,17 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(sess) = self.sessions.get(self.selected_session_idx) {
                     let sid = sess.id.clone();
-                    let _ = self.db.delete_session(&sid);
-                    self.set_status("Deleted session");
-                    self.refresh_data();
+                    let short = sess.short_id().to_string();
+                    let target = PendingDelete::Session(sid.clone());
+                    if self.pending_delete.as_ref() == Some(&target) {
+                        self.pending_delete = None;
+                        let _ = self.db.delete_session(&sid);
+                        self.set_status(format!("Deleted session {}", short));
+                        self.refresh_data();
+                    } else {
+                        self.pending_delete = Some(target);
+                        self.set_status(format!("Press 'd' again to delete session {}", short));
+                    }
                 }
             }
             _ => {}
@@ -949,6 +1125,7 @@ impl App {
     }
 
     fn switch_tab(&mut self, next: ActiveTab) {
+        self.pending_delete = None;
         if self.active_tab != next {
             self.previous_tab = self.active_tab;
             self.active_tab = next;
@@ -982,6 +1159,11 @@ impl App {
             }
             KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('+') | KeyCode::Char('=') => {
                 self.adjust_setting(1);
+            }
+            KeyCode::Char('e') if self.settings_idx == 10 => {
+                self.modal = ModalState::DbPathEditor {
+                    buf: Database::display_short_path(self.db.path()),
+                };
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
                 if self.settings_idx == 10 {
@@ -1234,11 +1416,13 @@ impl App {
                 focus,
             } => match key.code {
                 KeyCode::Esc => (),
-                KeyCode::Tab | KeyCode::Down | KeyCode::Up => {
+                KeyCode::Tab | KeyCode::BackTab => {
                     *focus = 1 - *focus;
                     self.modal = modal;
                 }
-                KeyCode::Right if !*is_activity && *focus == 1 && !self.spaces.is_empty() => {
+                KeyCode::Down | KeyCode::Right
+                    if !*is_activity && *focus == 1 && !self.spaces.is_empty() =>
+                {
                     let cur = self
                         .spaces
                         .iter()
@@ -1252,7 +1436,9 @@ impl App {
                     }
                     self.modal = modal;
                 }
-                KeyCode::Left if !*is_activity && *focus == 1 && !self.spaces.is_empty() => {
+                KeyCode::Up | KeyCode::Left
+                    if !*is_activity && *focus == 1 && !self.spaces.is_empty() =>
+                {
                     let cur = self
                         .spaces
                         .iter()
@@ -1262,6 +1448,16 @@ impl App {
                         Some(0) => space_buf.clear(),
                         Some(i) => *space_buf = self.spaces[i - 1].clone(),
                     }
+                    self.modal = modal;
+                }
+                KeyCode::Up | KeyCode::Right if *is_activity && *focus == 1 => {
+                    let cur = est_buf.parse::<u32>().unwrap_or(1);
+                    *est_buf = (cur + 1).min(50).to_string();
+                    self.modal = modal;
+                }
+                KeyCode::Down | KeyCode::Left if *is_activity && *focus == 1 => {
+                    let cur = est_buf.parse::<u32>().unwrap_or(1);
+                    *est_buf = cur.saturating_sub(1).max(1).to_string();
                     self.modal = modal;
                 }
                 KeyCode::Backspace => {

@@ -49,8 +49,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let header = Line::from(Span::styled(
         format!(
-            "  {:<9} {:<13} {:<5} {:>4}  {:<10} {:<15} {:<17} {}",
-            "ID", "Started", "Type", "Dur", "Status", "Project", "Activity", "Notes"
+            "  {:<9} {:<13} {:<5} {:>4}  {:<10} {:<12} {:<14} {:<16} {}",
+            "ID", "Started", "Type", "Dur", "Status", "Space", "Project", "Activity", "Notes"
         ),
         Style::default().fg(theme.muted),
     ));
@@ -67,10 +67,10 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         return;
     }
 
-    let fixed_cols = 2 + 10 + 14 + 6 + 6 + 11 + 16 + 18;
+    let fixed_cols = 2 + 10 + 14 + 6 + 6 + 11 + 13 + 15 + 17;
     let notes_max = (chunks[2].width as usize)
         .saturating_sub(fixed_cols)
-        .max(16);
+        .max(12);
 
     let items: Vec<ListItem> = app
         .sessions
@@ -93,6 +93,12 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 SessionStatus::Partial => theme.warning,
                 SessionStatus::Skipped => theme.muted,
                 SessionStatus::InProgress => theme.primary,
+            };
+            let space_str = s.space.as_deref().unwrap_or("—");
+            let space_col = if s.space.is_some() {
+                theme.secondary
+            } else {
+                theme.muted
             };
             let proj_str = s.project_name.as_deref().unwrap_or("unassigned");
             let proj_col = if s.project_name.is_some() {
@@ -125,11 +131,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     Style::default().fg(status_col).bg(bg),
                 ),
                 Span::styled(
-                    format!("{:<15} ", trunc(proj_str, 14)),
+                    format!("{:<12} ", trunc(space_str, 11)),
+                    Style::default().fg(space_col).bg(bg),
+                ),
+                Span::styled(
+                    format!("{:<14} ", trunc(proj_str, 13)),
                     Style::default().fg(proj_col).bg(bg),
                 ),
                 Span::styled(
-                    format!("{:<17} ", trunc(act_str, 16)),
+                    format!("{:<16} ", trunc(act_str, 15)),
                     Style::default().fg(theme.fg).bg(bg),
                 ),
                 Span::styled(

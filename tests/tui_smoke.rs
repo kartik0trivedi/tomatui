@@ -19,6 +19,7 @@ fn test_all_views_and_modals_render_without_panic() {
     let mut app = App::new(
         db,
         LaunchOptions {
+            space: Some("Work".to_string()),
             project: Some("backend-api".to_string()),
             activity: Some("API schema".to_string()),
             work_mins: Some(25),
@@ -102,4 +103,91 @@ fn test_all_views_and_modals_render_without_panic() {
     app.on_key(key(KeyCode::Char('?')));
     assert!(matches!(app.modal, ModalState::Help));
     terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Esc));
+
+    // 7. ContextPicker (`p`) shows and updates Space, Project, Activity
+    app.on_key(key(KeyCode::Char('1')));
+    app.on_key(key(KeyCode::Char('p')));
+    assert!(matches!(app.modal, ModalState::ContextPicker { .. }));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Esc));
+
+    // 8. Projects tab (3-column: Spaces | Projects | Activities)
+    // Pane 0 (Spaces): press 'a' to add a new Space "School", 'e' to edit Space
+    app.on_key(key(KeyCode::Char('2')));
+    assert_eq!(app.projects_pane_focus, 0);
+    app.on_key(key(KeyCode::Char('a')));
+    assert!(matches!(
+        app.modal,
+        ModalState::SpaceEditor {
+            original_name: None,
+            ..
+        }
+    ));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    for ch in "School".chars() {
+        app.on_key(key(KeyCode::Char(ch)));
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.spaces, vec!["School", "Work"]);
+    assert_eq!(app.selected_projects_space(), Some("School"));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+
+    // Edit Space via 'e'
+    app.on_key(key(KeyCode::Char('e')));
+    assert!(matches!(
+        app.modal,
+        ModalState::SpaceEditor {
+            original_name: Some(_),
+            ..
+        }
+    ));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Esc));
+
+    // Move right to Pane 1 (Projects): press 'a' — space is pre-filled with "School"
+    app.on_key(key(KeyCode::Right));
+    assert_eq!(app.projects_pane_focus, 1);
+    app.on_key(key(KeyCode::Char('a')));
+    assert!(matches!(
+        app.modal,
+        ModalState::ItemEditor {
+            edit_id: None,
+            is_activity: false,
+            ..
+        }
+    ));
+    for ch in "research-paper".chars() {
+        app.on_key(key(KeyCode::Char(ch)));
+    }
+    app.on_key(key(KeyCode::Enter));
+    assert_eq!(app.filtered_projects.len(), 1);
+    assert_eq!(app.filtered_projects[0].name, "research-paper");
+    assert_eq!(app.filtered_projects[0].space.as_deref(), Some("School"));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+
+    // Edit Project via 'e'
+    app.on_key(key(KeyCode::Char('e')));
+    assert!(matches!(
+        app.modal,
+        ModalState::ItemEditor {
+            edit_id: Some(_),
+            is_activity: false,
+            ..
+        }
+    ));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Esc));
+
+    // 9. Stats tab: left/right arrows cycle [All, School, Work]
+    app.on_key(key(KeyCode::Char('4')));
+    assert_eq!(app.active_stats_space(), None);
+    app.on_key(key(KeyCode::Right));
+    assert_eq!(app.active_stats_space(), Some("School"));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Right));
+    assert_eq!(app.active_stats_space(), Some("Work"));
+    terminal.draw(|f| ui::render(f, &mut app)).unwrap();
+    app.on_key(key(KeyCode::Left));
+    assert_eq!(app.active_stats_space(), Some("School"));
 }

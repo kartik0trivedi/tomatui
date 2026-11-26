@@ -120,29 +120,72 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             ];
             f.render_widget(Paragraph::new(lines), inner);
         }
-        ModalState::AddItem {
-            is_activity,
+        ModalState::SpaceEditor {
+            original_name,
             name_buf,
-            est_buf,
-            focus,
         } => {
-            let title = if *is_activity {
-                " Add Activity "
+            let title = if original_name.is_some() {
+                " Edit Space "
             } else {
-                " Add Project "
+                " Add Space "
             };
-            let popup = centered_rect(52, if *is_activity { 9 } else { 7 }, area);
+            let popup = centered_rect(54, 8, area);
             f.render_widget(Clear, popup);
             let block = modal_block(title, theme);
             let inner = block.inner(popup);
             f.render_widget(block, popup);
 
-            let max_w = (inner.width as usize).saturating_sub(11).max(10);
+            let max_w = (inner.width as usize).saturating_sub(12).max(10);
+            let name_vis = visible_input_tail(name_buf, max_w);
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(" Space : ", Style::default().fg(theme.muted)),
+                    Span::styled(
+                        format!(" {}_ ", name_vis),
+                        Style::default()
+                            .fg(theme.fg)
+                            .bg(theme.highlight)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    "         e.g. School, Work, Client, Personal",
+                    Style::default().fg(theme.muted),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    " Enter Save   Esc Cancel",
+                    Style::default().fg(theme.primary),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), inner);
+        }
+        ModalState::ItemEditor {
+            edit_id,
+            is_activity,
+            name_buf,
+            space_buf,
+            est_buf,
+            focus,
+        } => {
+            let title = match (*is_activity, edit_id.is_some()) {
+                (true, true) => " Edit Activity ",
+                (true, false) => " Add Activity ",
+                (false, true) => " Edit Project ",
+                (false, false) => " Add Project ",
+            };
+            let popup = centered_rect(56, 10, area);
+            f.render_widget(Clear, popup);
+            let block = modal_block(title, theme);
+            let inner = block.inner(popup);
+            f.render_widget(block, popup);
+
+            let max_w = (inner.width as usize).saturating_sub(12).max(10);
             let name_vis = visible_input_tail(name_buf, max_w);
             let mut lines = vec![Line::from(vec![
-                Span::styled(" Name: ", Style::default().fg(theme.muted)),
+                Span::styled(" Name  : ", Style::default().fg(theme.muted)),
                 Span::styled(
-                    format!(" {}_ ", name_vis),
+                    format!(" {}{} ", name_vis, if *focus == 0 { "_" } else { "" }),
                     if *focus == 0 {
                         Style::default().fg(theme.fg).bg(theme.highlight)
                     } else {
@@ -163,17 +206,46 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                         },
                     ),
                 ]));
+            } else {
+                let space_vis = if space_buf.is_empty() {
+                    "(optional — team, client, org)".to_string()
+                } else {
+                    visible_input_tail(space_buf, max_w)
+                };
+                lines.push(Line::raw(""));
+                lines.push(Line::from(vec![
+                    Span::styled(" Space : ", Style::default().fg(theme.muted)),
+                    Span::styled(
+                        format!(" {}{} ", space_vis, if *focus == 1 { "_" } else { "" }),
+                        if *focus == 1 {
+                            Style::default().fg(theme.fg).bg(theme.highlight)
+                        } else {
+                            Style::default().fg(if space_buf.is_empty() {
+                                theme.muted
+                            } else {
+                                theme.secondary
+                            })
+                        },
+                    ),
+                ]));
+                if !app.spaces.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "         ←→ cycle existing spaces or type new",
+                        Style::default().fg(theme.muted),
+                    )));
+                }
             }
             lines.push(Line::raw(""));
             lines.push(Line::from(Span::styled(
-                " Enter Save   Esc Cancel",
-                Style::default().fg(theme.muted),
+                " Tab Next Field   Enter Save   Esc Cancel",
+                Style::default().fg(theme.primary),
             )));
             f.render_widget(Paragraph::new(lines), inner);
         }
         ModalState::ContextPicker {
             session_id,
             focus,
+            space_input,
             project_input,
             activity_input,
             status,
@@ -184,9 +256,9 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let title = if is_history {
                 " Edit Session "
             } else {
-                " Select Project & Activity "
+                " Select Space, Project & Activity "
             };
-            let popup = centered_rect(58, if is_history { 13 } else { 10 }, area);
+            let popup = centered_rect(60, if is_history { 16 } else { 13 }, area);
             f.render_widget(Clear, popup);
             let block = modal_block(title, theme);
             let inner = block.inner(popup);
@@ -204,6 +276,11 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             };
 
             let field_w = (inner.width as usize).saturating_sub(16).max(10);
+            let space_display = if space_input.is_empty() {
+                "(none — optional)".to_string()
+            } else {
+                visible_input_tail(space_input, field_w)
+            };
             let proj_display = if project_input.is_empty() {
                 "(unassigned)".to_string()
             } else {
@@ -218,10 +295,28 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
             let mut lines = vec![
                 Line::from(vec![
+                    Span::styled(" Space    : ", Style::default().fg(theme.muted)),
+                    Span::styled(
+                        format!(" {}{} ", space_display, if *focus == 0 { "_" } else { "" }),
+                        if *focus == 0 {
+                            input_style(true)
+                        } else if space_input.is_empty() {
+                            Style::default().fg(theme.muted)
+                        } else {
+                            Style::default().fg(theme.secondary)
+                        },
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    "            ↑↓ cycle existing or type new (team, client, org)",
+                    Style::default().fg(theme.muted),
+                )),
+                Line::raw(""),
+                Line::from(vec![
                     Span::styled(" Project  : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(" {}{} ", proj_display, if *focus == 0 { "_" } else { "" }),
-                        input_style(*focus == 0),
+                        format!(" {}{} ", proj_display, if *focus == 1 { "_" } else { "" }),
+                        input_style(*focus == 1),
                     ),
                 ]),
                 Line::from(Span::styled(
@@ -232,8 +327,8 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Line::from(vec![
                     Span::styled(" Activity : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(" {}{} ", act_display, if *focus == 1 { "_" } else { "" }),
-                        input_style(*focus == 1),
+                        format!(" {}{} ", act_display, if *focus == 2 { "_" } else { "" }),
+                        input_style(*focus == 2),
                     ),
                 ]),
             ];
@@ -244,15 +339,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                     Span::styled(" Status   : ", Style::default().fg(theme.muted)),
                     Span::styled(
                         format!(" ◀ {} ▶ ", status.as_str()),
-                        input_style(*focus == 2),
+                        input_style(*focus == 3),
                     ),
                 ]));
                 lines.push(Line::raw(""));
                 lines.push(Line::from(vec![
                     Span::styled(" Notes    : ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        format!(" {}{} ", notes_display, if *focus == 3 { "_" } else { "" }),
-                        input_style(*focus == 3),
+                        format!(" {}{} ", notes_display, if *focus == 4 { "_" } else { "" }),
+                        input_style(*focus == 4),
                     ),
                 ]));
             }
@@ -280,10 +375,11 @@ fn render_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Line::raw(""),
         Line::from(" Timer:"),
         Line::from("   Enter / Space     Start, Pause, or Resume"),
-        Line::from("   p                 Assign or change Project / Activity"),
+        Line::from("   p                 Assign or change Space / Project / Activity"),
         Line::from("   t                 Set Plan (presets or 3 numbers: focus, break, batches)"),
         Line::from("   n / s / Esc       Edit note / Skip phase / Stop"),
         Line::raw(""),
+        Line::from(" Stats  :  ←→ filter by Space [All, spaces] · r cycle range"),
         Line::from(" History:  e or Enter to edit any past session · u for unassigned"),
         Line::from(" CLI    :  tomatui PROJECT --25 --2   |   tomatui stats --json"),
         Line::raw(""),

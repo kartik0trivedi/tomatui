@@ -30,15 +30,17 @@ pub enum ModalState {
         break_buf: String,
         batches_buf: String,
     },
-    /// Project & Activity picker (works in Opening View, mid-session, or History Edit)
+    /// Space, Project & Activity picker (works in Opening View, mid-session, or History Edit)
     ContextPicker {
         /// None = editing active timer context; Some(session_id) = editing historical session
         session_id: Option<String>,
-        focus: usize, // 0=project list/input, 1=activity list/input, 2=status (history only), 3=notes (history only)
+        focus: usize, // 0=space, 1=project, 2=activity, 3=status (history only), 4=notes (history only)
+        space_input: String,
         project_input: String,
         activity_input: String,
         status: SessionStatus,
         notes_input: String,
+        space_idx: usize,
         project_idx: usize,
         activity_idx: usize,
     },
@@ -46,10 +48,17 @@ pub enum ModalState {
     NoteEditor {
         buf: String,
     },
-    /// Add new project or activity from Projects tab
-    AddItem {
+    /// Add or rename a space from Spaces pane in Projects tab
+    SpaceEditor {
+        original_name: Option<String>,
+        name_buf: String,
+    },
+    /// Add or edit a project (name + optional space) or activity (name + est) from Projects tab
+    ItemEditor {
+        edit_id: Option<String>,
         is_activity: bool,
         name_buf: String,
+        space_buf: String,
         est_buf: String,
         focus: usize,
     },
@@ -93,18 +102,23 @@ pub struct App {
     pub opening_focus: usize,
 
     // Cached views refreshed from SQLite
+    pub spaces: Vec<String>,
     pub projects: Vec<Project>,
+    pub filtered_projects: Vec<Project>,
     pub project_activities: Vec<Activity>,
+    pub selected_space_idx: usize, // 0 = All, 1..=spaces.len() = specific space
     pub selected_project_idx: usize,
     pub selected_activity_idx: usize,
-    pub projects_pane_focus: usize, // 0=projects, 1=activities
+    pub projects_pane_focus: usize, // 0=spaces, 1=projects, 2=activities
 
     pub sessions: Vec<SessionRecord>,
     pub selected_session_idx: usize,
     pub history_unassigned_only: bool,
 
     pub stats_range: StatsRange,
+    pub stats_space_idx: usize, // 0 = All, 1..=spaces.len() = specific space
     pub stats_report: StatsReport,
+    pub stats_view_report: StatsReport,
 
     pub settings_idx: usize,
     pub status_message: Option<String>,
@@ -122,18 +136,19 @@ impl App {
         let plan = SessionPlan::new(work_mins, break_mins, batches);
         let timer = PomodoroTimer::with_plan(plan);
 
-        let active_project = launch
-            .project
-            .as_deref()
-            .and_then(|name| db.get_or_create_project(name, None).ok());
+        let active_project = launch.project.as_deref().and_then(|name| {
+            db.get_or_create_project_in_space(name, launch.space.as_deref(), None)
+                .ok()
+        });
         let active_activity = match (&active_project, launch.activity.as_deref()) {
             (Some(proj), Some(act_name)) => db.get_or_create_activity(&proj.id, act_name, 1).ok(),
             _ => None,
         };
 
         let stats_report = db
-            .get_stats(StatsRange::Week, None)
+            .get_stats(StatsRange::Week, None, None)
             .unwrap_or_else(|_| empty_stats(StatsRange::Week));
+        let stats_view_report = stats_report.clone();
 
         let mut app = Self {
             db,
@@ -149,8 +164,11 @@ impl App {
             active_note: String::new(),
             active_session_id: None,
             opening_focus: 2, // Highlight Start Focus by default for 1-keystroke start
+            spaces: Vec::new(),
             projects: Vec::new(),
+            filtered_projects: Vec::new(),
             project_activities: Vec::new(),
+            selected_space_idx: 0,
             selected_project_idx: 0,
             selected_activity_idx: 0,
             projects_pane_focus: 0,
@@ -158,7 +176,9 @@ impl App {
             selected_session_idx: 0,
             history_unassigned_only: false,
             stats_range: StatsRange::Week,
+            stats_space_idx: 0,
             stats_report,
+            stats_view_report,
             settings_idx: 0,
             status_message: None,
             status_ticks: 0,
@@ -174,13 +194,54 @@ impl App {
         app
     }
 
+    pub fn selected_projects_space(&self) -> Option<&str> {
+        if self.selected_space_idx == 0 {
+            None
+        } else {
+            self.spaces
+                .get(self.selected_space_idx - 1)
+                .map(String::as_str)
+        }
+    }
+
+    pub fn active_stats_space(&self) -> Option<&str> {
+        if self.stats_space_idx == 0 {
+            None
+        } else {
+            self.spaces
+                .get(self.stats_space_idx - 1)
+                .map(String::as_str)
+        }
+    }
+
     pub fn refresh_data(&mut self) {
+        self.spaces = self.db.list_spaces().unwrap_or_default();
+        if self.selected_space_idx > self.spaces.len() {
+            self.selected_space_idx = 0;
+        }
+        if self.stats_space_idx > self.spaces.len() {
+            self.stats_space_idx = 0;
+        }
         self.projects = self.db.list_projects(false).unwrap_or_default();
-        if self.selected_project_idx >= self.projects.len() {
-            self.selected_project_idx = self.projects.len().saturating_sub(1);
+        self.filtered_projects = match self.selected_projects_space() {
+            None => self.projects.clone(),
+            Some(sp) => self
+                .projects
+                .iter()
+                .filter(|p| {
+                    p.space
+                        .as_deref()
+                        .map(|s| s.eq_ignore_ascii_case(sp))
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect(),
+        };
+        if self.selected_project_idx >= self.filtered_projects.len() {
+            self.selected_project_idx = self.filtered_projects.len().saturating_sub(1);
         }
         let sel_proj_id = self
-            .projects
+            .filtered_projects
             .get(self.selected_project_idx)
             .map(|p| p.id.clone());
         self.project_activities = match sel_proj_id.as_deref() {
@@ -203,8 +264,15 @@ impl App {
             self.selected_session_idx = self.sessions.len().saturating_sub(1);
         }
 
-        if let Ok(report) = self.db.get_stats(self.stats_range, None) {
+        if let Ok(report) = self.db.get_stats(self.stats_range, None, None) {
             self.stats_report = report;
+        }
+        let space_filter = self.active_stats_space().map(ToString::to_string);
+        if let Ok(filtered) =
+            self.db
+                .get_stats(self.stats_range, None, space_filter.as_deref())
+        {
+            self.stats_view_report = filtered;
         }
     }
 
@@ -215,8 +283,14 @@ impl App {
 
     pub fn active_context_label(&self) -> String {
         match (&self.active_project, &self.active_activity) {
-            (Some(p), Some(a)) => format!("{} / {}", p.name, a.name),
-            (Some(p), None) => p.name.clone(),
+            (Some(p), Some(a)) => match p.space.as_deref().filter(|s| !s.is_empty()) {
+                Some(sp) => format!("{} · {} / {}", sp, p.name, a.name),
+                None => format!("{} / {}", p.name, a.name),
+            },
+            (Some(p), None) => match p.space.as_deref().filter(|s| !s.is_empty()) {
+                Some(sp) => format!("{} · {}", sp, p.name),
+                None => p.name.clone(),
+            },
             (None, _) => "Unassigned (tag later)".to_string(),
         }
     }
@@ -376,9 +450,11 @@ impl App {
 
     pub fn open_context_picker(&mut self, session_id: Option<String>) {
         self.refresh_data();
-        let (proj_input, act_input, status, notes) = if let Some(ref sid) = session_id {
+        let (space_input, proj_input, act_input, status, notes) = if let Some(ref sid) = session_id
+        {
             if let Ok(Some(s)) = self.db.get_session_by_id(sid) {
                 (
+                    s.space.unwrap_or_default(),
                     s.project_name.unwrap_or_default(),
                     s.activity_name.unwrap_or_default(),
                     s.status,
@@ -388,12 +464,17 @@ impl App {
                 (
                     String::new(),
                     String::new(),
+                    String::new(),
                     SessionStatus::Completed,
                     String::new(),
                 )
             }
         } else {
             (
+                self.active_project
+                    .as_ref()
+                    .and_then(|p| p.space.clone())
+                    .unwrap_or_default(),
                 self.active_project
                     .as_ref()
                     .map(|p| p.name.clone())
@@ -410,10 +491,12 @@ impl App {
         self.modal = ModalState::ContextPicker {
             session_id,
             focus: 0,
+            space_input,
             project_input: proj_input,
             activity_input: act_input,
             status,
             notes_input: notes,
+            space_idx: 0,
             project_idx: 0,
             activity_idx: 0,
         };
@@ -627,50 +710,133 @@ impl App {
 
     fn handle_projects_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Left | KeyCode::Char('h') => self.projects_pane_focus = 0,
-            KeyCode::Right | KeyCode::Char('l') => self.projects_pane_focus = 1,
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.projects_pane_focus == 0 {
-                    if !self.projects.is_empty() {
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.projects_pane_focus = self.projects_pane_focus.saturating_sub(1);
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.projects_pane_focus = (self.projects_pane_focus + 1).min(2);
+            }
+            KeyCode::Up | KeyCode::Char('k') => match self.projects_pane_focus {
+                0 => {
+                    let total = self.spaces.len() + 1;
+                    self.selected_space_idx = (self.selected_space_idx + total - 1) % total;
+                    self.selected_project_idx = 0;
+                    self.selected_activity_idx = 0;
+                    self.refresh_data();
+                }
+                1 => {
+                    if !self.filtered_projects.is_empty() {
                         self.selected_project_idx = if self.selected_project_idx == 0 {
-                            self.projects.len() - 1
+                            self.filtered_projects.len() - 1
                         } else {
                             self.selected_project_idx - 1
                         };
                         self.selected_activity_idx = 0;
                         self.refresh_data();
                     }
-                } else if !self.project_activities.is_empty() {
-                    self.selected_activity_idx = if self.selected_activity_idx == 0 {
-                        self.project_activities.len() - 1
-                    } else {
-                        self.selected_activity_idx - 1
-                    };
                 }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.projects_pane_focus == 0 {
-                    if !self.projects.is_empty() {
+                _ => {
+                    if !self.project_activities.is_empty() {
+                        self.selected_activity_idx = if self.selected_activity_idx == 0 {
+                            self.project_activities.len() - 1
+                        } else {
+                            self.selected_activity_idx - 1
+                        };
+                    }
+                }
+            },
+            KeyCode::Down | KeyCode::Char('j') => match self.projects_pane_focus {
+                0 => {
+                    let total = self.spaces.len() + 1;
+                    self.selected_space_idx = (self.selected_space_idx + 1) % total;
+                    self.selected_project_idx = 0;
+                    self.selected_activity_idx = 0;
+                    self.refresh_data();
+                }
+                1 => {
+                    if !self.filtered_projects.is_empty() {
                         self.selected_project_idx =
-                            (self.selected_project_idx + 1) % self.projects.len();
+                            (self.selected_project_idx + 1) % self.filtered_projects.len();
                         self.selected_activity_idx = 0;
                         self.refresh_data();
                     }
-                } else if !self.project_activities.is_empty() {
-                    self.selected_activity_idx =
-                        (self.selected_activity_idx + 1) % self.project_activities.len();
                 }
-            }
-            KeyCode::Char('a') => {
-                let is_act = self.projects_pane_focus == 1 && !self.projects.is_empty();
-                self.modal = ModalState::AddItem {
-                    is_activity: is_act,
-                    name_buf: String::new(),
-                    est_buf: "2".to_string(),
-                    focus: 0,
-                };
-            }
-            KeyCode::Char(' ') if self.projects_pane_focus == 1 => {
+                _ => {
+                    if !self.project_activities.is_empty() {
+                        self.selected_activity_idx =
+                            (self.selected_activity_idx + 1) % self.project_activities.len();
+                    }
+                }
+            },
+            KeyCode::Char('a') => match self.projects_pane_focus {
+                0 => {
+                    self.modal = ModalState::SpaceEditor {
+                        original_name: None,
+                        name_buf: String::new(),
+                    };
+                }
+                1 => {
+                    let default_space = self
+                        .selected_projects_space()
+                        .unwrap_or_default()
+                        .to_string();
+                    self.modal = ModalState::ItemEditor {
+                        edit_id: None,
+                        is_activity: false,
+                        name_buf: String::new(),
+                        space_buf: default_space,
+                        est_buf: "2".to_string(),
+                        focus: 0,
+                    };
+                }
+                _ => {
+                    if !self.filtered_projects.is_empty() {
+                        self.modal = ModalState::ItemEditor {
+                            edit_id: None,
+                            is_activity: true,
+                            name_buf: String::new(),
+                            space_buf: String::new(),
+                            est_buf: "2".to_string(),
+                            focus: 0,
+                        };
+                    }
+                }
+            },
+            KeyCode::Char('e') => match self.projects_pane_focus {
+                0 => {
+                    if let Some(sp) = self.selected_projects_space().map(ToString::to_string) {
+                        self.modal = ModalState::SpaceEditor {
+                            original_name: Some(sp.clone()),
+                            name_buf: sp,
+                        };
+                    }
+                }
+                1 => {
+                    if let Some(proj) = self.filtered_projects.get(self.selected_project_idx) {
+                        self.modal = ModalState::ItemEditor {
+                            edit_id: Some(proj.id.clone()),
+                            is_activity: false,
+                            name_buf: proj.name.clone(),
+                            space_buf: proj.space.clone().unwrap_or_default(),
+                            est_buf: "2".to_string(),
+                            focus: 0,
+                        };
+                    }
+                }
+                _ => {
+                    if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
+                        self.modal = ModalState::ItemEditor {
+                            edit_id: Some(act.id.clone()),
+                            is_activity: true,
+                            name_buf: act.name.clone(),
+                            space_buf: String::new(),
+                            est_buf: act.estimated_pomodoros.to_string(),
+                            focus: 0,
+                        };
+                    }
+                }
+            },
+            KeyCode::Char(' ') if self.projects_pane_focus == 2 => {
                 if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
                     let id = act.id.clone();
                     let _ = self.db.toggle_activity_completed(&id);
@@ -678,9 +844,15 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if let Some(proj) = self.projects.get(self.selected_project_idx).cloned() {
+                if self.projects_pane_focus == 0 {
+                    self.projects_pane_focus = 1;
+                } else if let Some(proj) = self
+                    .filtered_projects
+                    .get(self.selected_project_idx)
+                    .cloned()
+                {
                     self.active_project = Some(proj);
-                    self.active_activity = if self.projects_pane_focus == 1 {
+                    self.active_activity = if self.projects_pane_focus == 2 {
                         self.project_activities
                             .get(self.selected_activity_idx)
                             .cloned()
@@ -691,22 +863,33 @@ impl App {
                     self.set_status(format!("Selected: {}", self.active_context_label()));
                 }
             }
-            KeyCode::Char('d') => {
-                if self.projects_pane_focus == 1 {
+            KeyCode::Char('d') => match self.projects_pane_focus {
+                0 => {
+                    if let Some(sp) = self.selected_projects_space().map(ToString::to_string) {
+                        let _ = self.db.delete_space(&sp);
+                        self.selected_space_idx = 0;
+                        self.set_status(format!("Removed space: {}", sp));
+                        self.refresh_data();
+                    }
+                }
+                1 => {
+                    if let Some(proj) = self.filtered_projects.get(self.selected_project_idx) {
+                        let id = proj.id.clone();
+                        let name = proj.name.clone();
+                        let _ = self.db.set_project_archived(&id, true);
+                        self.set_status(format!("Archived project: {}", name));
+                        self.refresh_data();
+                    }
+                }
+                _ => {
                     if let Some(act) = self.project_activities.get(self.selected_activity_idx) {
                         let id = act.id.clone();
                         let _ = self.db.delete_activity(&id);
                         self.set_status("Deleted activity");
                         self.refresh_data();
                     }
-                } else if let Some(proj) = self.projects.get(self.selected_project_idx) {
-                    let id = proj.id.clone();
-                    let name = proj.name.clone();
-                    let _ = self.db.set_project_archived(&id, true);
-                    self.set_status(format!("Archived project: {}", name));
-                    self.refresh_data();
                 }
-            }
+            },
             _ => {}
         }
     }
@@ -747,9 +930,21 @@ impl App {
     }
 
     fn handle_stats_key(&mut self, key: KeyEvent) {
-        if let KeyCode::Char('r') | KeyCode::Right | KeyCode::Char('l') = key.code {
-            self.stats_range = self.stats_range.next();
-            self.refresh_data();
+        let total_filters = self.spaces.len() + 1; // 0 = All, 1..=N = spaces
+        match key.code {
+            KeyCode::Right | KeyCode::Char('l') if total_filters > 1 => {
+                self.stats_space_idx = (self.stats_space_idx + 1) % total_filters;
+                self.refresh_data();
+            }
+            KeyCode::Left | KeyCode::Char('h') if total_filters > 1 => {
+                self.stats_space_idx = (self.stats_space_idx + total_filters - 1) % total_filters;
+                self.refresh_data();
+            }
+            KeyCode::Char('r') => {
+                self.stats_range = self.stats_range.next();
+                self.refresh_data();
+            }
+            _ => {}
         }
     }
 
@@ -964,30 +1159,130 @@ impl App {
                 },
                 _ => self.modal = modal,
             },
-            ModalState::AddItem {
+            ModalState::SpaceEditor {
+                original_name,
+                name_buf,
+            } => match key.code {
+                KeyCode::Esc => (),
+                KeyCode::Backspace => {
+                    name_buf.pop();
+                    self.modal = modal;
+                }
+                KeyCode::Char(ch) => {
+                    name_buf.push(ch);
+                    self.modal = modal;
+                }
+                KeyCode::Enter => {
+                    let name = name_buf.trim().to_string();
+                    if !name.is_empty() {
+                        let stored_opt = if let Some(ref orig) = original_name {
+                            match self.db.rename_space(orig, &name) {
+                                Ok(stored) => {
+                                    if let Some(ref mut ap) = self.active_project {
+                                        if ap
+                                            .space
+                                            .as_deref()
+                                            .map(|s| s.eq_ignore_ascii_case(orig))
+                                            .unwrap_or(false)
+                                        {
+                                            ap.space = Some(stored.clone());
+                                        }
+                                    }
+                                    self.set_status(format!("Renamed space → {}", stored));
+                                    Some(stored)
+                                }
+                                Err(e) => {
+                                    self.set_status(format!("Could not rename space: {}", e));
+                                    None
+                                }
+                            }
+                        } else {
+                            match self.db.add_space(&name) {
+                                Ok(stored) => {
+                                    self.set_status(format!("Added space: {}", stored));
+                                    Some(stored)
+                                }
+                                Err(e) => {
+                                    self.set_status(format!("Could not add space: {}", e));
+                                    None
+                                }
+                            }
+                        };
+                        if let Some(stored) = stored_opt {
+                            self.refresh_data();
+                            if let Some(idx) = self
+                                .spaces
+                                .iter()
+                                .position(|s| s.eq_ignore_ascii_case(&stored))
+                            {
+                                self.selected_space_idx = idx + 1;
+                                self.selected_project_idx = 0;
+                                self.selected_activity_idx = 0;
+                                self.refresh_data();
+                            }
+                        }
+                    }
+                }
+                _ => self.modal = modal,
+            },
+            ModalState::ItemEditor {
+                edit_id,
                 is_activity,
                 name_buf,
+                space_buf,
                 est_buf,
                 focus,
             } => match key.code {
                 KeyCode::Esc => (),
-                KeyCode::Tab | KeyCode::Down | KeyCode::Up if *is_activity => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Up => {
                     *focus = 1 - *focus;
+                    self.modal = modal;
+                }
+                KeyCode::Right if !*is_activity && *focus == 1 && !self.spaces.is_empty() => {
+                    let cur = self
+                        .spaces
+                        .iter()
+                        .position(|s| s.eq_ignore_ascii_case(space_buf.trim()));
+                    match cur {
+                        None => *space_buf = self.spaces[0].clone(),
+                        Some(i) if i + 1 < self.spaces.len() => {
+                            *space_buf = self.spaces[i + 1].clone();
+                        }
+                        Some(_) => space_buf.clear(),
+                    }
+                    self.modal = modal;
+                }
+                KeyCode::Left if !*is_activity && *focus == 1 && !self.spaces.is_empty() => {
+                    let cur = self
+                        .spaces
+                        .iter()
+                        .position(|s| s.eq_ignore_ascii_case(space_buf.trim()));
+                    match cur {
+                        None => *space_buf = self.spaces[self.spaces.len() - 1].clone(),
+                        Some(0) => space_buf.clear(),
+                        Some(i) => *space_buf = self.spaces[i - 1].clone(),
+                    }
                     self.modal = modal;
                 }
                 KeyCode::Backspace => {
                     if *focus == 0 {
                         name_buf.pop();
-                    } else {
+                    } else if *is_activity {
                         est_buf.pop();
+                    } else {
+                        space_buf.pop();
                     }
                     self.modal = modal;
                 }
                 KeyCode::Char(ch) => {
                     if *focus == 0 {
                         name_buf.push(ch);
-                    } else if ch.is_ascii_digit() && est_buf.len() < 2 {
-                        est_buf.push(ch);
+                    } else if *is_activity {
+                        if ch.is_ascii_digit() && est_buf.len() < 2 {
+                            est_buf.push(ch);
+                        }
+                    } else {
+                        space_buf.push(ch);
                     }
                     self.modal = modal;
                 }
@@ -995,14 +1290,54 @@ impl App {
                     let name = name_buf.trim().to_string();
                     if !name.is_empty() {
                         if *is_activity {
-                            if let Some(proj) = self.projects.get(self.selected_project_idx) {
-                                let est = est_buf.parse::<u32>().unwrap_or(1).max(1);
+                            let est = est_buf.parse::<u32>().unwrap_or(1).max(1);
+                            if let Some(ref aid) = edit_id {
+                                match self.db.update_activity(aid, &name, est) {
+                                    Ok(Some(updated)) => {
+                                        if let Some(ref mut aa) = self.active_activity {
+                                            if aa.id == updated.id {
+                                                *aa = updated.clone();
+                                            }
+                                        }
+                                        self.set_status(format!("Updated activity: {}", name));
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        self.set_status(format!("Could not update activity: {}", e));
+                                    }
+                                }
+                            } else if let Some(proj) =
+                                self.filtered_projects.get(self.selected_project_idx)
+                            {
                                 let _ = self.db.get_or_create_activity(&proj.id, &name, est);
                                 self.set_status(format!("Added activity: {}", name));
                             }
                         } else {
-                            let _ = self.db.get_or_create_project(&name, None);
-                            self.set_status(format!("Added project: {}", name));
+                            let sp = space_buf.trim();
+                            let sp_opt = if sp.is_empty() { None } else { Some(sp) };
+                            if let Some(ref pid) = edit_id {
+                                match self.db.update_project(pid, &name, sp_opt) {
+                                    Ok(Some(updated)) => {
+                                        if let Some(ref mut ap) = self.active_project {
+                                            if ap.id == updated.id {
+                                                *ap = updated.clone();
+                                            }
+                                        }
+                                        self.set_status(format!("Updated project: {}", name));
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        self.set_status(format!("Could not update project: {}", e));
+                                    }
+                                }
+                            } else {
+                                let _ = self.db.get_or_create_project_in_space(&name, sp_opt, None);
+                                if let Some(s) = sp_opt {
+                                    self.set_status(format!("Added project: {} ({})", name, s));
+                                } else {
+                                    self.set_status(format!("Added project: {}", name));
+                                }
+                            }
                         }
                         self.refresh_data();
                     }
@@ -1012,15 +1347,17 @@ impl App {
             ModalState::ContextPicker {
                 session_id,
                 focus,
+                space_input,
                 project_input,
                 activity_input,
                 status,
                 notes_input,
+                space_idx,
                 project_idx,
                 activity_idx,
             } => {
                 let is_history = session_id.is_some();
-                let max_focus = if is_history { 4 } else { 2 };
+                let max_focus = if is_history { 5 } else { 3 };
                 match key.code {
                     KeyCode::Esc => (),
                     KeyCode::Tab => {
@@ -1031,26 +1368,97 @@ impl App {
                         *focus = (*focus + max_focus - 1) % max_focus;
                         self.modal = modal;
                     }
-                    KeyCode::Down if *focus == 0 && !self.projects.is_empty() => {
-                        *project_idx = (*project_idx + 1) % (self.projects.len() + 1);
+                    KeyCode::Down if *focus == 0 && !self.spaces.is_empty() => {
+                        *space_idx = (*space_idx + 1) % (self.spaces.len() + 1);
+                        if *space_idx == 0 {
+                            space_input.clear();
+                        } else if let Some(sp) = self.spaces.get(*space_idx - 1) {
+                            *space_input = sp.clone();
+                        }
+                        *project_idx = 0;
+                        self.modal = modal;
+                    }
+                    KeyCode::Up if *focus == 0 && !self.spaces.is_empty() => {
+                        let len = self.spaces.len() + 1;
+                        *space_idx = (*space_idx + len - 1) % len;
+                        if *space_idx == 0 {
+                            space_input.clear();
+                        } else if let Some(sp) = self.spaces.get(*space_idx - 1) {
+                            *space_input = sp.clone();
+                        }
+                        *project_idx = 0;
+                        self.modal = modal;
+                    }
+                    KeyCode::Down if *focus == 1 && !self.projects.is_empty() => {
+                        let sp_trim = space_input.trim();
+                        let candidates: Vec<&Project> = if sp_trim.is_empty() {
+                            self.projects.iter().collect()
+                        } else {
+                            let in_space: Vec<&Project> = self
+                                .projects
+                                .iter()
+                                .filter(|p| {
+                                    p.space
+                                        .as_deref()
+                                        .map(|s| s.eq_ignore_ascii_case(sp_trim))
+                                        .unwrap_or(false)
+                                })
+                                .collect();
+                            if in_space.is_empty() {
+                                self.projects.iter().collect()
+                            } else {
+                                in_space
+                            }
+                        };
+                        *project_idx = (*project_idx + 1) % (candidates.len() + 1);
                         if *project_idx == 0 {
                             project_input.clear();
-                        } else if let Some(p) = self.projects.get(*project_idx - 1) {
+                        } else if let Some(p) = candidates.get(*project_idx - 1) {
                             *project_input = p.name.clone();
+                            if sp_trim.is_empty() {
+                                if let Some(ref psp) = p.space {
+                                    *space_input = psp.clone();
+                                }
+                            }
                         }
                         self.modal = modal;
                     }
-                    KeyCode::Up if *focus == 0 && !self.projects.is_empty() => {
-                        let len = self.projects.len() + 1;
+                    KeyCode::Up if *focus == 1 && !self.projects.is_empty() => {
+                        let sp_trim = space_input.trim();
+                        let candidates: Vec<&Project> = if sp_trim.is_empty() {
+                            self.projects.iter().collect()
+                        } else {
+                            let in_space: Vec<&Project> = self
+                                .projects
+                                .iter()
+                                .filter(|p| {
+                                    p.space
+                                        .as_deref()
+                                        .map(|s| s.eq_ignore_ascii_case(sp_trim))
+                                        .unwrap_or(false)
+                                })
+                                .collect();
+                            if in_space.is_empty() {
+                                self.projects.iter().collect()
+                            } else {
+                                in_space
+                            }
+                        };
+                        let len = candidates.len() + 1;
                         *project_idx = (*project_idx + len - 1) % len;
                         if *project_idx == 0 {
                             project_input.clear();
-                        } else if let Some(p) = self.projects.get(*project_idx - 1) {
+                        } else if let Some(p) = candidates.get(*project_idx - 1) {
                             *project_input = p.name.clone();
+                            if sp_trim.is_empty() {
+                                if let Some(ref psp) = p.space {
+                                    *space_input = psp.clone();
+                                }
+                            }
                         }
                         self.modal = modal;
                     }
-                    KeyCode::Down if *focus == 1 => {
+                    KeyCode::Down if *focus == 2 => {
                         if let Ok(Some(proj)) = self.db.find_project_by_name_or_id(project_input) {
                             if let Ok(acts) = self.db.list_activities(Some(&proj.id), false) {
                                 if !acts.is_empty() {
@@ -1065,19 +1473,38 @@ impl App {
                         }
                         self.modal = modal;
                     }
-                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *focus == 2 => {
+                    KeyCode::Up if *focus == 2 => {
+                        if let Ok(Some(proj)) = self.db.find_project_by_name_or_id(project_input) {
+                            if let Ok(acts) = self.db.list_activities(Some(&proj.id), false) {
+                                if !acts.is_empty() {
+                                    let len = acts.len() + 1;
+                                    *activity_idx = (*activity_idx + len - 1) % len;
+                                    if *activity_idx == 0 {
+                                        activity_input.clear();
+                                    } else if let Some(a) = acts.get(*activity_idx - 1) {
+                                        *activity_input = a.name.clone();
+                                    }
+                                }
+                            }
+                        }
+                        self.modal = modal;
+                    }
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *focus == 3 => {
                         *status = status.next_editable();
                         self.modal = modal;
                     }
                     KeyCode::Backspace => {
                         match *focus {
                             0 => {
-                                project_input.pop();
+                                space_input.pop();
                             }
                             1 => {
+                                project_input.pop();
+                            }
+                            2 => {
                                 activity_input.pop();
                             }
-                            3 => {
+                            4 => {
                                 notes_input.pop();
                             }
                             _ => {}
@@ -1086,20 +1513,39 @@ impl App {
                     }
                     KeyCode::Char(ch) => {
                         match *focus {
-                            0 => project_input.push(ch),
-                            1 => activity_input.push(ch),
-                            3 => notes_input.push(ch),
+                            0 => space_input.push(ch),
+                            1 => project_input.push(ch),
+                            2 => activity_input.push(ch),
+                            4 => notes_input.push(ch),
                             _ => {}
                         }
                         self.modal = modal;
                     }
                     KeyCode::Enter => {
+                        let s_trim = space_input.trim().to_string();
+                        let sp_opt = if s_trim.is_empty() {
+                            None
+                        } else {
+                            Some(s_trim.as_str())
+                        };
                         let p_trim = project_input.trim().to_string();
                         let a_trim = activity_input.trim().to_string();
                         let resolved_proj = if p_trim.is_empty() {
                             None
                         } else {
-                            self.db.get_or_create_project(&p_trim, None).ok()
+                            let proj = self
+                                .db
+                                .get_or_create_project_in_space(&p_trim, sp_opt, None)
+                                .ok();
+                            if let Some(mut p) = proj {
+                                if sp_opt.is_none() && p.space.is_some() {
+                                    let _ = self.db.set_project_space(&p.id, None);
+                                    p.space = None;
+                                }
+                                Some(p)
+                            } else {
+                                None
+                            }
                         };
                         let resolved_act = match (&resolved_proj, a_trim.is_empty()) {
                             (Some(p), false) => {
@@ -1143,6 +1589,7 @@ impl App {
 fn empty_stats(range: StatsRange) -> StatsReport {
     StatsReport {
         range,
+        space_filter: None,
         today_sessions: 0,
         today_focus_mins: 0,
         range_sessions: 0,

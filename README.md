@@ -14,7 +14,7 @@ A clean, offline-first Pomodoro TUI & agent-friendly CLI written in Rust, backed
 ## Features
 
 - **Minimalist TUI**: Bold geometric half-block numerals, smooth 8× sub-cell progress bar, mouse + keyboard navigation (`1–4` or `T/P/H/S` for tabs, `,` for Settings, `Esc` to return), and 18 built-in 24-bit RGB themes.
-- **Projects → Activities → Editable Sessions**: Organize work by Project and Activity, start immediately (even unassigned), and edit any live or historical session later to assign/change project, activity, status, or notes.
+- **Spaces → Projects → Activities → Editable Sessions**: Organize work with optional high-level Spaces (clients, teams, orgs), Projects, and Activities; filter Stats by Space (`←→`); start immediately (even unassigned), and edit any live or historical session later.
 - **Flexible Plans**: Quick presets (`25m × 1`, `25m × 2`, `50m × 2`) or manual 3-number entry (`t` → focus mins, break mins default `5`, batches default `1`).
 - **Quick-Launch CLI & Agent JSON Interface**: Launch batches directly from your shell (`tomatui backend-api --25 --2`) and let AI agents query or update sessions via structured `--json` output or direct SQLite reads.
 - **Zero-Asset Audio & Alerts**: Pure in-memory synthesized PCM16 chimes + native desktop notifications.
@@ -81,21 +81,41 @@ tomatui --50 --2
 
 ## CLI & Agent Usage
 
-Every management and analytics subcommand supports `--json` for scripts and AI agents:
+AI agents can inspect the full command list and JSON schemas in one shot via `tomatui guide --json` (aliases: `agent-help`, `schema`). Every management, import, and analytics subcommand supports `--json`:
 
 ```bash
-# Projects & Activities
+# Agent discovery (Markdown or structured JSON)
+tomatui guide
+tomatui guide --json
+
+# Spaces, Projects & Activities
+tomatui spaces add Work --json
 tomatui projects list --json
-tomatui projects add backend-api --json
+tomatui projects add backend-api --space Work --json
 tomatui activities add backend-api "API schema" --est 4 --json
 
+# Bulk import spaces, projects & activities in one transaction (file or stdin)
+cat <<'EOF' | tomatui import --json
+{
+  "spaces": ["School", "Work", "Client", "Personal"],
+  "projects": [
+    {
+      "name": "backend-api",
+      "space": "Work",
+      "activities": ["API schema", { "name": "Auth endpoints", "est": 4 }]
+    }
+  ]
+}
+EOF
+
 # Sessions (inspect & edit post-hoc)
+tomatui sessions list --space Work --json
 tomatui sessions list --unassigned --json
 tomatui sessions edit <ID_PREFIX> --project backend-api --activity "API schema" --notes "Done" --json
 
 # Analytics & Export
-tomatui stats --range week --json
-tomatui export --format csv
+tomatui stats --range week --space Work --json
+tomatui export --format csv --space Work
 tomatui db-path
 ```
 

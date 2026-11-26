@@ -1,9 +1,11 @@
-use crate::db::{Database, SessionFilter, SessionStatus, StatsRange};
+use crate::db::{Database, ImportPayload, SessionFilter, SessionStatus, StatsRange};
 use clap::{Parser, Subcommand};
+use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
+    pub space: Option<String>,
     pub project: Option<String>,
     pub activity: Option<String>,
     pub work_mins: Option<u32>,
@@ -17,7 +19,7 @@ pub struct LaunchOptions {
 #[command(
     name = "tomatui",
     version,
-    about = "Clean Pomodoro TUI & agent-friendly CLI backed by SQLite.\nQuick launch: tomatui PROJECT_NAME --25 --2"
+    about = "Clean Pomodoro TUI & agent-friendly CLI backed by SQLite.\nQuick launch: tomatui PROJECT_NAME --25 --2\nAI agents:    tomatui guide --json"
 )]
 pub struct Cli {
     /// Output structured JSON (ideal for AI agents and scripts)
@@ -38,6 +40,9 @@ pub enum Command {
     Start {
         /// Optional project name (auto-created if new)
         project: Option<String>,
+        /// Optional space / group for the project (e.g. School, Work, Client, Personal)
+        #[arg(long)]
+        space: Option<String>,
         /// Focus duration in minutes
         #[arg(short = 'd', long = "duration")]
         duration: Option<u32>,
@@ -57,6 +62,11 @@ pub enum Command {
         #[arg(long)]
         exit_on_done: bool,
     },
+    /// Manage spaces (high-level groups above projects: teams, clients, orgs)
+    Spaces {
+        #[command(subcommand)]
+        action: SpaceCmd,
+    },
     /// Manage projects
     Projects {
         #[command(subcommand)]
@@ -67,6 +77,17 @@ pub enum Command {
         #[command(subcommand)]
         action: ActivityCmd,
     },
+    /// Bulk-import spaces, projects, and activities from JSON (file or stdin)
+    Import {
+        /// Path to JSON file (omit or pass '-' to read from stdin)
+        file: Option<PathBuf>,
+        /// Validate and preview counts without writing to SQLite
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print a complete command & schema guide for AI agents and scripts
+    #[command(visible_aliases = ["agent-help", "schema"])]
+    Guide,
     /// Query and edit recorded sessions
     Sessions {
         #[command(subcommand)]
@@ -77,6 +98,9 @@ pub enum Command {
         /// Range: today, week, month, year, all
         #[arg(long, default_value = "week")]
         range: String,
+        /// Filter by space name
+        #[arg(long)]
+        space: Option<String>,
         /// Filter by project name
         #[arg(long)]
         project: Option<String>,
@@ -90,10 +114,19 @@ pub enum Command {
         #[arg(long)]
         to: Option<String>,
         #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
         project: Option<String>,
     },
     /// Print the active SQLite database path
     DbPath,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SpaceCmd {
+    List,
+    Add { name: String },
+    Delete { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -104,6 +137,8 @@ pub enum ProjectCmd {
     },
     Add {
         name: String,
+        #[arg(long)]
+        space: Option<String>,
         #[arg(long)]
         color: Option<String>,
     },
@@ -139,6 +174,8 @@ pub enum SessionCmd {
         #[arg(long)]
         to: Option<String>,
         #[arg(long)]
+        space: Option<String>,
+        #[arg(long)]
         project: Option<String>,
         #[arg(long)]
         unassigned: bool,
@@ -167,11 +204,16 @@ pub enum SessionCmd {
 
 const KNOWN_SUBCOMMANDS: &[&str] = &[
     "start",
+    "spaces",
     "projects",
     "activities",
     "sessions",
     "stats",
+    "import",
     "export",
+    "guide",
+    "agent-help",
+    "schema",
     "db-path",
     "help",
 ];
@@ -284,6 +326,7 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
     let json = cli.json;
     match cli.command {
         None => Ok(CliDispatch::LaunchTui(LaunchOptions {
+            space: None,
             project: None,
             activity: None,
             work_mins: None,
@@ -294,6 +337,7 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
         })),
         Some(Command::Start {
             project,
+            space,
             duration,
             batches,
             break_mins,
@@ -301,6 +345,7 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
             no_autostart,
             exit_on_done,
         }) => Ok(CliDispatch::LaunchTui(LaunchOptions {
+            space,
             project,
             activity,
             work_mins: duration,
@@ -315,6 +360,94 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                 println!("{}", serde_json::json!({ "db_path": p }));
             } else {
                 println!("{}", p);
+            }
+            Ok(CliDispatch::Handled)
+        }
+        Some(Command::Spaces { action }) => {
+            match action {
+                SpaceCmd::List => {
+                    let spaces = db.list_spaces().map_err(|e| e.to_string())?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({ "spaces": spaces }))
+                                .unwrap()
+                        );
+                    } else if spaces.is_empty() {
+                        println!("No spaces yet. Create one with `tomatui spaces add <NAME>`.");
+                    } else {
+                        for sp in spaces {
+                            println!("{}", sp);
+                        }
+                    }
+                }
+                SpaceCmd::Add { name } => {
+                    let stored = db.add_space(&name).map_err(|e| e.to_string())?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({ "space": stored }))
+                                .unwrap()
+                        );
+                    } else {
+                        println!("Space ready: {}", stored);
+                    }
+                }
+                SpaceCmd::Delete { name } => {
+                    let deleted = db.delete_space(&name).map_err(|e| e.to_string())?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({ "deleted": deleted, "space": name })
+                        );
+                    } else if deleted {
+                        println!("Removed space: {} (projects kept ungrouped)", name);
+                    } else {
+                        return Err(format!("Space not found: {}", name));
+                    }
+                }
+            }
+            Ok(CliDispatch::Handled)
+        }
+        Some(Command::Import { file, dry_run }) => {
+            let raw = match file {
+                Some(ref path) if path.as_os_str() != "-" => std::fs::read_to_string(path)
+                    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?,
+                _ => {
+                    let mut buf = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut buf)
+                        .map_err(|e| format!("Failed to read stdin: {}", e))?;
+                    buf
+                }
+            };
+            let payload: ImportPayload = serde_json::from_str(&raw)
+                .map_err(|e| format!("Invalid import JSON: {}", e))?;
+            let summary = db
+                .bulk_import(payload, dry_run)
+                .map_err(|e| e.to_string())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+            } else {
+                let prefix = if summary.dry_run { "[dry-run] " } else { "" };
+                println!(
+                    "{}Imported {} space(s), {} project(s), {} activity(ies).",
+                    prefix,
+                    summary.spaces_processed,
+                    summary.projects_processed,
+                    summary.activities_processed
+                );
+            }
+            Ok(CliDispatch::Handled)
+        }
+        Some(Command::Guide) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&agent_guide_json(db)).unwrap()
+                );
+            } else {
+                print!("{}", agent_guide_markdown(db));
             }
             Ok(CliDispatch::Handled)
         }
@@ -335,19 +468,22 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     } else {
                         for p in projects {
                             let tag = if p.archived { " [archived]" } else { "" };
+                            let sp = p.space.as_deref().unwrap_or("-");
                             println!(
-                                "{:<24} {:>4} sessions  {:>5}m{}",
-                                p.name, p.session_count, p.total_focus_mins, tag
+                                "{:<14} {:<24} {:>4} sessions  {:>5}m{}",
+                                sp, p.name, p.session_count, p.total_focus_mins, tag
                             );
                         }
                     }
                 }
-                ProjectCmd::Add { name, color } => {
+                ProjectCmd::Add { name, space, color } => {
                     let proj = db
-                        .get_or_create_project(&name, color.as_deref())
+                        .get_or_create_project_in_space(&name, space.as_deref(), color.as_deref())
                         .map_err(|e| e.to_string())?;
                     if json {
                         println!("{}", serde_json::to_string_pretty(&proj).unwrap());
+                    } else if let Some(ref sp) = proj.space {
+                        println!("Project ready: {} / {} ({})", sp, proj.name, &proj.id[..8]);
                     } else {
                         println!("Project ready: {} ({})", proj.name, &proj.id[..8]);
                     }
@@ -453,6 +589,7 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                 SessionCmd::List {
                     from,
                     to,
+                    space,
                     project,
                     unassigned,
                     limit,
@@ -461,6 +598,7 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                         .list_sessions(&SessionFilter {
                             from_date: from,
                             to_date: to,
+                            space,
                             project,
                             unassigned_only: unassigned,
                             work_only: false,
@@ -480,11 +618,12 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                     } else {
                         for s in sessions {
                             println!(
-                                "{}  {}  {:>3}m  {:<10}  {:<16}  {:<20}  {}",
+                                "{}  {}  {:>3}m  {:<10}  {:<12}  {:<16}  {:<20}  {}",
                                 s.short_id(),
                                 &s.started_at[..s.started_at.len().min(16)],
                                 s.actual_mins(),
                                 s.status.as_str(),
+                                s.space.as_deref().unwrap_or("-"),
                                 s.project_name.as_deref().unwrap_or("Unassigned"),
                                 s.activity_name.as_deref().unwrap_or("-"),
                                 s.notes
@@ -584,17 +723,25 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
             }
             Ok(CliDispatch::Handled)
         }
-        Some(Command::Stats { range, project }) => {
+        Some(Command::Stats {
+            range,
+            space,
+            project,
+        }) => {
             let r = StatsRange::parse_user(&range).ok_or_else(|| {
                 format!("Invalid range '{}'. Use today|week|month|year|all.", range)
             })?;
             let report = db
-                .get_stats(r, project.as_deref())
+                .get_stats(r, project.as_deref(), space.as_deref())
                 .map_err(|e| e.to_string())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report).unwrap());
             } else {
-                println!("Range: {}", report.range.label());
+                if let Some(ref sp) = report.space_filter {
+                    println!("Range: {} | Space: {}", report.range.label(), sp);
+                } else {
+                    println!("Range: {}", report.range.label());
+                }
                 println!(
                     "Today: {} sessions ({}m) | Streak: {}d (best {}d)",
                     report.today_sessions,
@@ -609,9 +756,13 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
                 if !report.by_project.is_empty() {
                     println!("\nBy project:");
                     for p in &report.by_project {
+                        let label = match p.space.as_deref() {
+                            Some(sp) => format!("{} / {}", sp, p.project),
+                            None => p.project.clone(),
+                        };
                         println!(
-                            "  {:<22} {:>3} sessions  {:>5}m",
-                            p.project, p.sessions, p.focus_mins
+                            "  {:<28} {:>3} sessions  {:>5}m",
+                            label, p.sessions, p.focus_mins
                         );
                     }
                 }
@@ -622,11 +773,13 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
             format,
             from,
             to,
+            space,
             project,
         }) => {
             let filter = SessionFilter {
                 from_date: from,
                 to_date: to,
+                space,
                 project,
                 unassigned_only: false,
                 work_only: false,
@@ -649,6 +802,160 @@ pub fn execute_cli(cli: Cli, db: &Database) -> Result<CliDispatch, String> {
             Ok(CliDispatch::Handled)
         }
     }
+}
+
+pub fn agent_guide_json(db: &Database) -> serde_json::Value {
+    serde_json::json!({
+        "name": "tomatui",
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "Offline-first Pomodoro TUI & agent-friendly CLI backed by SQLite.",
+        "db_path": db.path().display().to_string(),
+        "hierarchy": ["Space (optional)", "Project", "Activity", "Session"],
+        "global_flags": [
+            { "flag": "--json", "description": "Emit structured JSON on all non-TUI commands" },
+            { "flag": "--db <PATH>", "description": "Override SQLite database path (or set TOMATUI_DB)" }
+        ],
+        "commands": [
+            {
+                "command": "tomatui guide --json",
+                "aliases": ["agent-help", "schema"],
+                "description": "Print this machine-readable command & schema manifest (omit --json for Markdown)"
+            },
+            {
+                "command": "tomatui spaces list|add|delete",
+                "examples": [
+                    "tomatui spaces list --json",
+                    "tomatui spaces add Work --json",
+                    "tomatui spaces delete Work --json"
+                ]
+            },
+            {
+                "command": "tomatui projects list|add|archive",
+                "examples": [
+                    "tomatui projects list --json",
+                    "tomatui projects add backend-api --space Work --json",
+                    "tomatui projects archive backend-api --json"
+                ]
+            },
+            {
+                "command": "tomatui activities list|add|done",
+                "examples": [
+                    "tomatui activities list --project backend-api --json",
+                    "tomatui activities add backend-api \"API schema\" --est 4 --json",
+                    "tomatui activities done <ID_PREFIX> --json"
+                ]
+            },
+            {
+                "command": "tomatui import [FILE|-] [--dry-run] [--json]",
+                "description": "Idempotently bulk-create spaces, projects, and activities in one SQLite transaction.",
+                "examples": [
+                    "tomatui import seed.json --json",
+                    "cat seed.json | tomatui import --dry-run --json"
+                ],
+                "accepted_json_shapes": {
+                    "bundle": {
+                        "spaces": ["School", "Work", "Client", "Personal"],
+                        "projects": [
+                            {
+                                "name": "backend-api",
+                                "space": "Work",
+                                "color": "#89b4fa",
+                                "activities": [
+                                    "API schema",
+                                    { "name": "Auth endpoints", "est": 4 }
+                                ]
+                            }
+                        ]
+                    },
+                    "array_shorthand": [
+                        {
+                            "space": "Client",
+                            "project": "website-redesign",
+                            "activities": [{ "name": "Landing page", "est": 3 }]
+                        }
+                    ]
+                }
+            },
+            {
+                "command": "tomatui sessions list|edit|delete",
+                "examples": [
+                    "tomatui sessions list --space Work --json",
+                    "tomatui sessions list --unassigned --json",
+                    "tomatui sessions edit <ID_PREFIX> --project backend-api --activity \"API schema\" --notes \"Done\" --json"
+                ]
+            },
+            {
+                "command": "tomatui stats [--range today|week|month|year|all] [--space <SPACE>] [--project <PROJECT>] --json",
+                "examples": [
+                    "tomatui stats --range week --json",
+                    "tomatui stats --range month --space Work --json"
+                ]
+            },
+            {
+                "command": "tomatui export [--format json|csv] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--space <SPACE>] [--project <PROJECT>]",
+                "examples": [
+                    "tomatui export --format csv --space Work"
+                ]
+            },
+            {
+                "command": "tomatui start [PROJECT] [--space <SPACE>] [--activity <ACT>] [--duration <M>] [--batches <N>] [--break <M>]",
+                "shorthand": "tomatui PROJECT --25 --2",
+                "description": "Launch interactive TUI timer"
+            },
+            {
+                "command": "tomatui db-path --json",
+                "description": "Print active SQLite database path"
+            }
+        ]
+    })
+}
+
+pub fn agent_guide_markdown(db: &Database) -> String {
+    format!(
+        r#"# tomatui CLI & Agent Guide (v{version})
+
+Data model: **Space** (optional: team, client, org) → **Project** → **Activity** → **Session**
+Active SQLite DB: `{db_path}`
+Tip: Pass `--json` to any management, import, stats, or query command for structured output.
+
+## Spaces, Projects & Activities
+- `tomatui spaces list --json`
+- `tomatui spaces add <NAME> --json`
+- `tomatui spaces delete <NAME> --json` (keeps projects ungrouped)
+- `tomatui projects list --json`
+- `tomatui projects add <NAME> [--space <SPACE>] [--color <HEX>] --json`
+- `tomatui activities add <PROJECT> <NAME> [--est <N>] --json`
+- `tomatui activities list [--project <PROJECT>] [--all] --json`
+- `tomatui activities done <ID_PREFIX> --json`
+
+## Bulk Import (Idempotent & Transactional)
+Pipe JSON via stdin or pass a file path (`--dry-run` validates without writing):
+```bash
+cat <<'EOF' | tomatui import --json
+{{
+  "spaces": ["School", "Work", "Client", "Personal"],
+  "projects": [
+    {{
+      "name": "backend-api",
+      "space": "Work",
+      "activities": ["API schema", {{ "name": "Auth endpoints", "est": 4 }}]
+    }}
+  ]
+}}
+EOF
+```
+*(Also accepts a top-level JSON array of project objects using `"name"` or `"project"`.)*
+
+## Sessions, Stats & Export
+- `tomatui sessions list [--space <SPACE>] [--project <PROJECT>] [--unassigned] --json`
+- `tomatui sessions edit <ID_PREFIX> [--project <P>] [--activity <A>] [--status completed|partial|skipped] [--notes <TEXT>] --json`
+- `tomatui stats [--range today|week|month|year|all] [--space <SPACE>] [--project <PROJECT>] --json`
+- `tomatui export --format json|csv [--space <SPACE>] [--project <PROJECT>]`
+- `tomatui guide --json` (machine-readable JSON version of this guide)
+"#,
+        version = env!("CARGO_PKG_VERSION"),
+        db_path = db.path().display()
+    )
 }
 
 #[cfg(test)]
@@ -703,5 +1010,20 @@ mod tests {
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(cli.json);
         assert!(matches!(cli.command, Some(Command::Stats { .. })));
+    }
+
+    #[test]
+    fn test_import_spaces_and_guide_subcommands_parse() {
+        for argv in [
+            vec!["tomatui", "spaces", "add", "Work", "--json"],
+            vec!["tomatui", "import", "--dry-run", "--json"],
+            vec!["tomatui", "guide", "--json"],
+            vec!["tomatui", "agent-help"],
+            vec!["tomatui", "schema", "--json"],
+        ] {
+            let norm = normalize_shorthand_args(argv);
+            let cli = Cli::try_parse_from(norm).unwrap();
+            assert!(!matches!(cli.command, Some(Command::Start { .. })));
+        }
     }
 }

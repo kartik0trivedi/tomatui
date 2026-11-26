@@ -59,6 +59,7 @@ impl SessionStatus {
 pub struct Project {
     pub id: String,
     pub name: String,
+    pub space: Option<String>,
     pub color: Option<String>,
     pub archived: bool,
     pub created_at: String,
@@ -84,6 +85,7 @@ pub struct SessionRecord {
     pub id: String,
     pub project_id: Option<String>,
     pub project_name: Option<String>,
+    pub space: Option<String>,
     pub activity_id: Option<String>,
     pub activity_name: Option<String>,
     pub phase: PomodoroPhase,
@@ -109,6 +111,7 @@ impl SessionRecord {
 pub struct SessionFilter {
     pub from_date: Option<String>,
     pub to_date: Option<String>,
+    pub space: Option<String>,
     pub project: Option<String>,
     pub unassigned_only: bool,
     pub work_only: bool,
@@ -161,6 +164,7 @@ impl StatsRange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectBreakdown {
     pub project: String,
+    pub space: Option<String>,
     pub sessions: u32,
     pub focus_mins: u32,
 }
@@ -184,6 +188,7 @@ pub struct DayBucket {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsReport {
     pub range: StatsRange,
+    pub space_filter: Option<String>,
     pub today_sessions: u32,
     pub today_focus_mins: u32,
     pub range_sessions: u32,
@@ -194,6 +199,76 @@ pub struct StatsReport {
     pub last_7_days: Vec<DayBucket>,
     pub by_project: Vec<ProjectBreakdown>,
     pub by_activity: Vec<ActivityBreakdown>,
+}
+
+/// Activity entry in a bulk import payload: either `"Lit review"` or `{"name": "Lit review", "est": 4}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ImportActivityEntry {
+    Name(String),
+    Detailed {
+        name: String,
+        #[serde(default = "default_import_est")]
+        est: u32,
+    },
+}
+
+fn default_import_est() -> u32 {
+    1
+}
+
+impl ImportActivityEntry {
+    pub fn name_and_est(&self) -> (&str, u32) {
+        match self {
+            Self::Name(n) => (n.as_str(), 1),
+            Self::Detailed { name, est } => (name.as_str(), (*est).max(1)),
+        }
+    }
+}
+
+/// Project entry in a bulk import payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportProjectEntry {
+    #[serde(alias = "project")]
+    pub name: String,
+    #[serde(default)]
+    pub space: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub activities: Vec<ImportActivityEntry>,
+}
+
+/// Bulk import JSON document: either `{ "spaces": [...], "projects": [...] }` or `[ { ... }, ... ]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ImportPayload {
+    Bundle {
+        #[serde(default)]
+        spaces: Vec<String>,
+        #[serde(default)]
+        projects: Vec<ImportProjectEntry>,
+    },
+    Projects(Vec<ImportProjectEntry>),
+}
+
+impl ImportPayload {
+    pub fn into_parts(self) -> (Vec<String>, Vec<ImportProjectEntry>) {
+        match self {
+            Self::Bundle { spaces, projects } => (spaces, projects),
+            Self::Projects(projects) => (Vec::new(), projects),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSummary {
+    pub dry_run: bool,
+    pub spaces_processed: usize,
+    pub projects_processed: usize,
+    pub activities_processed: usize,
+    pub spaces: Vec<String>,
+    pub projects: Vec<String>,
 }
 
 pub struct Database {
@@ -409,6 +484,27 @@ impl Database {
                 PRAGMA user_version = 1;",
             )?;
         }
+        if version < 2 {
+            self.conn.execute_batch(
+                "ALTER TABLE projects ADD COLUMN space TEXT;
+                 CREATE INDEX IF NOT EXISTS idx_projects_space ON projects(space);
+                 PRAGMA user_version = 2;",
+            )?;
+        }
+        if version < 3 {
+            self.conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS spaces (
+                    name       TEXT PRIMARY KEY COLLATE NOCASE,
+                    created_at TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO spaces (name, created_at)
+                SELECT DISTINCT TRIM(space), MIN(created_at)
+                FROM projects
+                WHERE space IS NOT NULL AND TRIM(space) != ''
+                GROUP BY TRIM(space) COLLATE NOCASE;
+                PRAGMA user_version = 3;",
+            )?;
+        }
         Ok(())
     }
 
@@ -447,27 +543,50 @@ impl Database {
         Ok(())
     }
 
-    // --- Projects ---
+    // --- Projects & Spaces ---
 
     pub fn get_or_create_project(
         &self,
         name: &str,
         color: Option<&str>,
     ) -> rusqlite::Result<Project> {
+        self.get_or_create_project_in_space(name, None, color)
+    }
+
+    pub fn get_or_create_project_in_space(
+        &self,
+        name: &str,
+        space: Option<&str>,
+        color: Option<&str>,
+    ) -> rusqlite::Result<Project> {
         let trimmed = name.trim();
+        let clean_space = space
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
         if let Some(existing) = self.find_project_by_name_or_id(trimmed)? {
+            if clean_space.is_some() && existing.space != clean_space {
+                self.set_project_space(&existing.id, clean_space.as_deref())?;
+                if let Some(updated) = self.find_project_by_name_or_id(&existing.id)? {
+                    return Ok(updated);
+                }
+            }
             return Ok(existing);
         }
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
+        if let Some(ref sp) = clean_space {
+            let _ = self.add_space(sp);
+        }
         self.conn.execute(
-            "INSERT INTO projects (id, name, color, archived, created_at)
-             VALUES (?1, ?2, ?3, 0, ?4)",
-            params![id, trimmed, color, now],
+            "INSERT INTO projects (id, name, space, color, archived, created_at)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+            params![id, trimmed, clean_space, color, now],
         )?;
         Ok(Project {
             id,
             name: trimmed.to_string(),
+            space: clean_space,
             color: color.map(ToString::to_string),
             archived: false,
             created_at: now,
@@ -476,11 +595,134 @@ impl Database {
         })
     }
 
+    pub fn add_space(&self, name: &str) -> rusqlite::Result<String> {
+        let trimmed = name.trim();
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO spaces (name, created_at) VALUES (?1, ?2)",
+            params![trimmed, now],
+        )?;
+        let stored: String = self
+            .conn
+            .query_row(
+                "SELECT name FROM spaces WHERE name = ?1 COLLATE NOCASE",
+                params![trimmed],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| trimmed.to_string());
+        Ok(stored)
+    }
+
+    pub fn delete_space(&self, name: &str) -> rusqlite::Result<bool> {
+        let trimmed = name.trim();
+        self.conn.execute(
+            "UPDATE projects SET space = NULL WHERE space = ?1 COLLATE NOCASE",
+            params![trimmed],
+        )?;
+        let count = self.conn.execute(
+            "DELETE FROM spaces WHERE name = ?1 COLLATE NOCASE",
+            params![trimmed],
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn rename_space(&self, old_name: &str, new_name: &str) -> rusqlite::Result<String> {
+        let old_t = old_name.trim();
+        let new_t = new_name.trim();
+        if new_t.is_empty() {
+            return Ok(old_t.to_string());
+        }
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let res = (|| -> rusqlite::Result<()> {
+            if old_t.eq_ignore_ascii_case(new_t) {
+                self.conn.execute(
+                    "UPDATE spaces SET name = ?1 WHERE name = ?2 COLLATE NOCASE",
+                    params![new_t, old_t],
+                )?;
+            } else {
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO spaces (name, created_at) VALUES (?1, ?2)",
+                    params![new_t, now],
+                )?;
+                self.conn.execute(
+                    "DELETE FROM spaces WHERE name = ?1 COLLATE NOCASE",
+                    params![old_t],
+                )?;
+            }
+            self.conn.execute(
+                "UPDATE projects SET space = ?1 WHERE space = ?2 COLLATE NOCASE",
+                params![new_t, old_t],
+            )?;
+            Ok(())
+        })();
+        match res {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT;")?;
+                Ok(new_t.to_string())
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
+    pub fn update_project(
+        &self,
+        id: &str,
+        new_name: &str,
+        space: Option<&str>,
+    ) -> rusqlite::Result<Option<Project>> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return self.find_project_by_name_or_id(id);
+        }
+        let clean_space = space.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(sp) = clean_space {
+            let _ = self.add_space(sp);
+        }
+        self.conn.execute(
+            "UPDATE projects SET name = ?1, space = ?2 WHERE id = ?3",
+            params![trimmed, clean_space, id],
+        )?;
+        self.find_project_by_name_or_id(id)
+    }
+
+    pub fn set_project_space(
+        &self,
+        query: &str,
+        space: Option<&str>,
+    ) -> rusqlite::Result<bool> {
+        let Some(proj) = self.find_project_by_name_or_id(query)? else {
+            return Ok(false);
+        };
+        let clean_space = space.map(str::trim).filter(|s| !s.is_empty());
+        if let Some(sp) = clean_space {
+            let _ = self.add_space(sp);
+        }
+        self.conn.execute(
+            "UPDATE projects SET space = ?1 WHERE id = ?2",
+            params![clean_space, proj.id],
+        )?;
+        Ok(true)
+    }
+
+    pub fn list_spaces(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name FROM spaces
+             WHERE TRIM(name) != ''
+             ORDER BY name COLLATE NOCASE ASC",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect()
+    }
+
     pub fn find_project_by_name_or_id(&self, query: &str) -> rusqlite::Result<Option<Project>> {
         let q = query.trim();
         let like_prefix = format!("{}%", q);
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, p.name, p.color, p.archived, p.created_at,
+            "SELECT p.id, p.name, p.space, p.color, p.archived, p.created_at,
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN s.actual_secs ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN 1 ELSE 0 END), 0)
              FROM projects p
@@ -490,15 +732,16 @@ impl Database {
              LIMIT 1",
         )?;
         stmt.query_row(params![q, like_prefix], |row| {
-            let secs: i64 = row.get(5)?;
+            let secs: i64 = row.get(6)?;
             Ok(Project {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                color: row.get(2)?,
-                archived: row.get::<_, i64>(3)? != 0,
-                created_at: row.get(4)?,
+                space: row.get(2)?,
+                color: row.get(3)?,
+                archived: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
                 total_focus_mins: ((secs + 30) / 60) as u32,
-                session_count: row.get::<_, i64>(6)? as u32,
+                session_count: row.get::<_, i64>(7)? as u32,
             })
         })
         .optional()
@@ -506,34 +749,40 @@ impl Database {
 
     pub fn list_projects(&self, include_archived: bool) -> rusqlite::Result<Vec<Project>> {
         let sql = if include_archived {
-            "SELECT p.id, p.name, p.color, p.archived, p.created_at,
+            "SELECT p.id, p.name, p.space, p.color, p.archived, p.created_at,
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN s.actual_secs ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN 1 ELSE 0 END), 0)
              FROM projects p
              LEFT JOIN sessions s ON s.project_id = p.id
              GROUP BY p.id
-             ORDER BY p.archived ASC, p.name COLLATE NOCASE ASC"
+             ORDER BY p.archived ASC,
+                      CASE WHEN p.space IS NULL OR TRIM(p.space) = '' THEN 1 ELSE 0 END ASC,
+                      p.space COLLATE NOCASE ASC,
+                      p.name COLLATE NOCASE ASC"
         } else {
-            "SELECT p.id, p.name, p.color, p.archived, p.created_at,
+            "SELECT p.id, p.name, p.space, p.color, p.archived, p.created_at,
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN s.actual_secs ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN s.phase='work' AND s.status IN ('completed','partial') THEN 1 ELSE 0 END), 0)
              FROM projects p
              LEFT JOIN sessions s ON s.project_id = p.id
              WHERE p.archived = 0
              GROUP BY p.id
-             ORDER BY p.name COLLATE NOCASE ASC"
+             ORDER BY CASE WHEN p.space IS NULL OR TRIM(p.space) = '' THEN 1 ELSE 0 END ASC,
+                      p.space COLLATE NOCASE ASC,
+                      p.name COLLATE NOCASE ASC"
         };
         let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt.query_map([], |row| {
-            let secs: i64 = row.get(5)?;
+            let secs: i64 = row.get(6)?;
             Ok(Project {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                color: row.get(2)?,
-                archived: row.get::<_, i64>(3)? != 0,
-                created_at: row.get(4)?,
+                space: row.get(2)?,
+                color: row.get(3)?,
+                archived: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
                 total_focus_mins: ((secs + 30) / 60) as u32,
-                session_count: row.get::<_, i64>(6)? as u32,
+                session_count: row.get::<_, i64>(7)? as u32,
             })
         })?;
         rows.collect()
@@ -675,6 +924,24 @@ impl Database {
         self.get_activity_by_id(&act.id)
     }
 
+    pub fn update_activity(
+        &self,
+        id: &str,
+        new_name: &str,
+        estimated: u32,
+    ) -> rusqlite::Result<Option<Activity>> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return self.get_activity_by_id(id);
+        }
+        let est = estimated.clamp(1, 50);
+        self.conn.execute(
+            "UPDATE activities SET name = ?1, estimated_pomodoros = ?2 WHERE id = ?3",
+            params![trimmed, est, id],
+        )?;
+        self.get_activity_by_id(id)
+    }
+
     pub fn delete_activity(&self, id_or_prefix: &str) -> rusqlite::Result<bool> {
         let Some(act) = self.get_activity_by_id(id_or_prefix)? else {
             return Ok(false);
@@ -723,7 +990,7 @@ impl Database {
         let trimmed = id_or_prefix.trim().trim_start_matches('#');
         let like_prefix = format!("{}%", trimmed);
         let mut stmt = self.conn.prepare(
-            "SELECT s.id, s.project_id, p.name, s.activity_id, a.name, s.phase, s.status,
+            "SELECT s.id, s.project_id, p.name, p.space, s.activity_id, a.name, s.phase, s.status,
                     s.planned_mins, s.actual_secs, s.started_at, s.ended_at, s.notes
              FROM sessions s
              LEFT JOIN projects p ON p.id = s.project_id
@@ -740,15 +1007,16 @@ impl Database {
             id: row.get(0)?,
             project_id: row.get(1)?,
             project_name: row.get(2)?,
-            activity_id: row.get(3)?,
-            activity_name: row.get(4)?,
-            phase: PomodoroPhase::from_db(&row.get::<_, String>(5)?),
-            status: SessionStatus::from_db(&row.get::<_, String>(6)?),
-            planned_mins: row.get::<_, i64>(7)? as u32,
-            actual_secs: row.get::<_, i64>(8)? as u32,
-            started_at: row.get(9)?,
-            ended_at: row.get(10)?,
-            notes: row.get(11)?,
+            space: row.get(3)?,
+            activity_id: row.get(4)?,
+            activity_name: row.get(5)?,
+            phase: PomodoroPhase::from_db(&row.get::<_, String>(6)?),
+            status: SessionStatus::from_db(&row.get::<_, String>(7)?),
+            planned_mins: row.get::<_, i64>(8)? as u32,
+            actual_secs: row.get::<_, i64>(9)? as u32,
+            started_at: row.get(10)?,
+            ended_at: row.get(11)?,
+            notes: row.get(12)?,
         })
     }
 
@@ -801,7 +1069,7 @@ impl Database {
 
     pub fn list_sessions(&self, filter: &SessionFilter) -> rusqlite::Result<Vec<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT s.id, s.project_id, p.name, s.activity_id, a.name, s.phase, s.status,
+            "SELECT s.id, s.project_id, p.name, p.space, s.activity_id, a.name, s.phase, s.status,
                     s.planned_mins, s.actual_secs, s.started_at, s.ended_at, s.notes
              FROM sessions s
              LEFT JOIN projects p ON p.id = s.project_id
@@ -829,6 +1097,16 @@ impl Database {
                 }
                 if filter.unassigned_only && s.project_id.is_some() {
                     return false;
+                }
+                if let Some(ref space_q) = filter.space {
+                    let matches = s
+                        .space
+                        .as_deref()
+                        .map(|sp| sp.eq_ignore_ascii_case(space_q))
+                        .unwrap_or(false);
+                    if !matches {
+                        return false;
+                    }
                 }
                 if let Some(ref proj_q) = filter.project {
                     let matches = s
@@ -872,8 +1150,10 @@ impl Database {
         &self,
         range: StatsRange,
         project_filter: Option<&str>,
+        space_filter: Option<&str>,
     ) -> rusqlite::Result<StatsReport> {
         let all_work = self.list_sessions(&SessionFilter {
+            space: space_filter.map(ToString::to_string),
             project: project_filter.map(ToString::to_string),
             work_only: true,
             ..Default::default()
@@ -899,7 +1179,7 @@ impl Database {
         for i in (0..7).rev() {
             day_map.insert(today - Duration::days(i), (0, 0));
         }
-        let mut proj_map: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+        let mut proj_map: BTreeMap<String, (Option<String>, u32, u32)> = BTreeMap::new();
         let mut act_map: BTreeMap<(String, String), (u32, u32)> = BTreeMap::new();
 
         for s in &all_work {
@@ -933,9 +1213,11 @@ impl Database {
                     .project_name
                     .clone()
                     .unwrap_or_else(|| "Unassigned".to_string());
-                let pe = proj_map.entry(pname.clone()).or_insert((0, 0));
-                pe.0 += 1;
-                pe.1 = pe.1.saturating_add(s.actual_secs);
+                let pe = proj_map
+                    .entry(pname.clone())
+                    .or_insert_with(|| (s.space.clone(), 0, 0));
+                pe.1 += 1;
+                pe.2 = pe.2.saturating_add(s.actual_secs);
 
                 if let Some(aname) = &s.activity_name {
                     let ae = act_map.entry((pname, aname.clone())).or_insert((0, 0));
@@ -972,8 +1254,9 @@ impl Database {
 
         let mut by_project: Vec<ProjectBreakdown> = proj_map
             .into_iter()
-            .map(|(project, (sessions, secs))| ProjectBreakdown {
+            .map(|(project, (space, sessions, secs))| ProjectBreakdown {
                 project,
+                space,
                 sessions,
                 focus_mins: (secs + 30) / 60,
             })
@@ -995,6 +1278,7 @@ impl Database {
 
         Ok(StatsReport {
             range,
+            space_filter: space_filter.map(ToString::to_string),
             today_sessions,
             today_focus_mins: (today_secs + 30) / 60,
             range_sessions,
@@ -1011,7 +1295,7 @@ impl Database {
     pub fn export_csv(&self, filter: &SessionFilter) -> rusqlite::Result<String> {
         let sessions = self.list_sessions(filter)?;
         let mut out = String::from(
-            "id,started_at,ended_at,phase,status,planned_mins,actual_secs,project,activity,notes\n",
+            "id,started_at,ended_at,phase,status,planned_mins,actual_secs,space,project,activity,notes\n",
         );
         for s in sessions {
             let esc = |v: &str| {
@@ -1022,7 +1306,7 @@ impl Database {
                 }
             };
             out.push_str(&format!(
-                "{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{},{},{},{}\n",
                 esc(&s.id),
                 esc(&s.started_at),
                 esc(s.ended_at.as_deref().unwrap_or("")),
@@ -1030,12 +1314,113 @@ impl Database {
                 s.status.as_str(),
                 s.planned_mins,
                 s.actual_secs,
+                esc(s.space.as_deref().unwrap_or("")),
                 esc(s.project_name.as_deref().unwrap_or("")),
                 esc(s.activity_name.as_deref().unwrap_or("")),
                 esc(&s.notes),
             ));
         }
         Ok(out)
+    }
+
+    /// Idempotently imports spaces, projects, and activities in a single SQLite transaction.
+    pub fn bulk_import(
+        &self,
+        payload: ImportPayload,
+        dry_run: bool,
+    ) -> rusqlite::Result<ImportSummary> {
+        let (spaces, projects) = payload.into_parts();
+        let mut seen_spaces: Vec<String> = Vec::new();
+        let mut seen_projects: Vec<String> = Vec::new();
+        let mut activities_processed = 0usize;
+
+        let push_unique = |vec: &mut Vec<String>, val: &str| {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() && !vec.iter().any(|x| x.eq_ignore_ascii_case(trimmed)) {
+                vec.push(trimmed.to_string());
+            }
+        };
+
+        if dry_run {
+            for sp in &spaces {
+                push_unique(&mut seen_spaces, sp);
+            }
+            for proj in &projects {
+                if let Some(ref sp) = proj.space {
+                    push_unique(&mut seen_spaces, sp);
+                }
+                let pname = proj.name.trim();
+                if pname.is_empty() {
+                    continue;
+                }
+                push_unique(&mut seen_projects, pname);
+                for act in &proj.activities {
+                    let (aname, _) = act.name_and_est();
+                    if !aname.trim().is_empty() {
+                        activities_processed += 1;
+                    }
+                }
+            }
+            return Ok(ImportSummary {
+                dry_run: true,
+                spaces_processed: seen_spaces.len(),
+                projects_processed: seen_projects.len(),
+                activities_processed,
+                spaces: seen_spaces,
+                projects: seen_projects,
+            });
+        }
+
+        self.conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let res = (|| -> rusqlite::Result<()> {
+            for sp in &spaces {
+                let trimmed = sp.trim();
+                if !trimmed.is_empty() {
+                    let stored = self.add_space(trimmed)?;
+                    push_unique(&mut seen_spaces, &stored);
+                }
+            }
+            for proj in &projects {
+                let pname = proj.name.trim();
+                if pname.is_empty() {
+                    continue;
+                }
+                let sp_opt = proj.space.as_deref().map(str::trim).filter(|s| !s.is_empty());
+                if let Some(sp) = sp_opt {
+                    let stored = self.add_space(sp)?;
+                    push_unique(&mut seen_spaces, &stored);
+                }
+                let created_proj =
+                    self.get_or_create_project_in_space(pname, sp_opt, proj.color.as_deref())?;
+                push_unique(&mut seen_projects, &created_proj.name);
+                for act in &proj.activities {
+                    let (aname, est) = act.name_and_est();
+                    if !aname.trim().is_empty() {
+                        self.get_or_create_activity(&created_proj.id, aname, est)?;
+                        activities_processed += 1;
+                    }
+                }
+            }
+            Ok(())
+        })();
+
+        match res {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT;")?;
+                Ok(ImportSummary {
+                    dry_run: false,
+                    spaces_processed: seen_spaces.len(),
+                    projects_processed: seen_projects.len(),
+                    activities_processed,
+                    spaces: seen_spaces,
+                    projects: seen_projects,
+                })
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
     }
 }
 
@@ -1111,11 +1496,89 @@ mod tests {
         assert_eq!(edited.activity_name.as_deref(), Some("API schema"));
         assert_eq!(edited.notes, "Auth endpoints");
 
-        let stats = db.get_stats(StatsRange::Week, None).unwrap();
+        let stats = db.get_stats(StatsRange::Week, None, None).unwrap();
         assert_eq!(stats.today_sessions, 1);
         assert_eq!(stats.today_focus_mins, 25);
         assert_eq!(stats.unassigned_sessions, 0);
         assert_eq!(stats.by_project.len(), 1);
         assert_eq!(stats.by_project[0].project, "backend-api");
+    }
+
+    #[test]
+    fn test_spaces_grouping_and_stats_filtering() {
+        let db = Database::open_in_memory().unwrap();
+        let p_work = db
+            .get_or_create_project_in_space("backend-api", Some("Work"), None)
+            .unwrap();
+        let p_client = db
+            .get_or_create_project_in_space("pipeline", Some("Client"), None)
+            .unwrap();
+        let _p_solo = db.get_or_create_project("personal-blog", None).unwrap();
+
+        assert_eq!(db.list_spaces().unwrap(), vec!["Client", "Work"]);
+
+        let s1 = db
+            .start_session(PomodoroPhase::Work, 25, Some(&p_work.id), None, "")
+            .unwrap();
+        db.finish_session(&s1.id, SessionStatus::Completed, 1500)
+            .unwrap();
+
+        let s2 = db
+            .start_session(PomodoroPhase::Work, 50, Some(&p_client.id), None, "")
+            .unwrap();
+        db.finish_session(&s2.id, SessionStatus::Completed, 3000)
+            .unwrap();
+
+        let all_stats = db.get_stats(StatsRange::Week, None, None).unwrap();
+        assert_eq!(all_stats.range_sessions, 2);
+        assert_eq!(all_stats.range_focus_mins, 75);
+
+        let work_stats = db.get_stats(StatsRange::Week, None, Some("Work")).unwrap();
+        assert_eq!(work_stats.range_sessions, 1);
+        assert_eq!(work_stats.range_focus_mins, 25);
+        assert_eq!(work_stats.by_project.len(), 1);
+        assert_eq!(work_stats.by_project[0].project, "backend-api");
+        assert_eq!(work_stats.by_project[0].space.as_deref(), Some("Work"));
+    }
+
+    #[test]
+    fn test_bulk_import_bundle_and_array_idempotent() {
+        let db = Database::open_in_memory().unwrap();
+        let json = r#"{
+            "spaces": ["School"],
+            "projects": [
+                {
+                    "name": "backend-api",
+                    "space": "Work",
+                    "activities": ["API schema", { "name": "Auth", "est": 4 }]
+                },
+                {
+                    "project": "data-pipeline",
+                    "space": "Client",
+                    "activities": [{ "name": "ETL script", "est": 3 }]
+                }
+            ]
+        }"#;
+        let payload: ImportPayload = serde_json::from_str(json).unwrap();
+
+        // Dry run writes nothing
+        let dry = db.bulk_import(payload.clone(), true).unwrap();
+        assert!(dry.dry_run);
+        assert_eq!(dry.spaces_processed, 3);
+        assert_eq!(dry.projects_processed, 2);
+        assert_eq!(dry.activities_processed, 3);
+        assert!(db.list_spaces().unwrap().is_empty());
+
+        // Real import writes atomically and is idempotent on re-run
+        let real = db.bulk_import(payload.clone(), false).unwrap();
+        assert!(!real.dry_run);
+        assert_eq!(db.list_spaces().unwrap(), vec!["Client", "School", "Work"]);
+        assert_eq!(db.list_projects(false).unwrap().len(), 2);
+        assert_eq!(db.list_activities(None, true).unwrap().len(), 3);
+
+        let rerun = db.bulk_import(payload, false).unwrap();
+        assert_eq!(rerun.projects_processed, 2);
+        assert_eq!(db.list_projects(false).unwrap().len(), 2);
+        assert_eq!(db.list_activities(None, true).unwrap().len(), 3);
     }
 }

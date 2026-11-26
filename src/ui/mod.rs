@@ -160,10 +160,10 @@ fn render_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         }
         ActiveTab::Timer => "Space Pause   s Skip   p Project   n Note   Esc Stop   q Quit  ",
         ActiveTab::Projects => {
-            "←→ Pane   a Add   Space Done   Enter Select   d Archive/Del   q Quit  "
+            "←→ Pane   a Add   e Edit   Space Done   Enter Select   d Del   q Quit  "
         }
         ActiveTab::History => "e/Enter Edit   u Unassigned   d Delete   ? Help   q Quit  ",
-        ActiveTab::Stats => "r Cycle Range   ? Help   q Quit  ",
+        ActiveTab::Stats => "←→ Space   r Cycle Range   ? Help   q Quit  ",
         ActiveTab::Settings => "1-4 Tabs   Esc Back   ↑↓ Select   ←→/Enter Edit   q Quit  ",
     };
 

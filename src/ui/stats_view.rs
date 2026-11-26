@@ -9,16 +9,42 @@ use ratatui::{
 };
 
 pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let r = &app.stats_report;
+    let r = &app.stats_view_report;
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
+            Constraint::Length(2), // Space filter bar [All, spaces...]
             Constraint::Length(3), // Summary metrics row
             Constraint::Length(1), // Gap
             Constraint::Min(8),    // 7-day chart + project breakdown
         ])
         .split(area);
+
+    // Space filter bar: [All]  Client  Personal  School  Work   (◀ ▶)
+    let mut filter_spans = vec![Span::styled("Space: ", Style::default().fg(theme.muted))];
+    let pill = |label: &str, active: bool| -> Span<'static> {
+        if active {
+            Span::styled(
+                format!(" {} ", label),
+                Style::default()
+                    .fg(theme.button_fg())
+                    .bg(theme.primary)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(format!(" {} ", label), Style::default().fg(theme.muted))
+        }
+    };
+    filter_spans.push(pill("All", app.stats_space_idx == 0));
+    for (idx, sp) in app.spaces.iter().enumerate() {
+        filter_spans.push(Span::raw(" "));
+        filter_spans.push(pill(sp, app.stats_space_idx == idx + 1));
+    }
+    if !app.spaces.is_empty() {
+        filter_spans.push(Span::styled("   ←→", Style::default().fg(theme.muted)));
+    }
+    f.render_widget(Paragraph::new(Line::from(filter_spans)), rows[0]);
 
     let cards = Layout::default()
         .direction(Direction::Horizontal)
@@ -28,7 +54,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Constraint::Percentage(25),
             Constraint::Percentage(25),
         ])
-        .split(rows[0]);
+        .split(rows[1]);
 
     let metric = |label: &str, value: String, color| {
         Paragraph::new(vec![
@@ -83,7 +109,7 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             Constraint::Length(3),
             Constraint::Percentage(48),
         ])
-        .split(rows[2]);
+        .split(rows[3]);
 
     // Left: 7-day BarChart
     let chart_data: Vec<(&str, u64)> = r
@@ -145,12 +171,23 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             .iter()
             .take(8)
             .map(|p| {
-                let filled = ((p.focus_mins as f64 / max_mins as f64) * 16.0).round() as usize;
-                let filled = filled.clamp(1, 16);
+                let filled = ((p.focus_mins as f64 / max_mins as f64) * 14.0).round() as usize;
+                let filled = filled.clamp(1, 14);
+                let label = if app.stats_space_idx == 0 {
+                    match p.space.as_deref().filter(|s| !s.is_empty()) {
+                        Some(sp) => format!("{} · {}", sp, p.project),
+                        None => p.project.clone(),
+                    }
+                } else {
+                    p.project.clone()
+                };
                 Line::from(vec![
-                    Span::styled(format!("{:<16} ", p.project), Style::default().fg(theme.fg)),
+                    Span::styled(
+                        format!("{:<18} ", trunc(&label, 18)),
+                        Style::default().fg(theme.fg),
+                    ),
                     Span::styled("━".repeat(filled), Style::default().fg(theme.primary)),
-                    Span::styled("━".repeat(16 - filled), Style::default().fg(theme.border)),
+                    Span::styled("━".repeat(14 - filled), Style::default().fg(theme.border)),
                     Span::styled(
                         format!("  {}m", p.focus_mins),
                         Style::default().fg(theme.muted),
@@ -159,5 +196,15 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             })
             .collect();
         f.render_widget(Paragraph::new(lines), right_v[1]);
+    }
+}
+
+fn trunc(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }

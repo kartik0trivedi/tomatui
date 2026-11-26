@@ -13,57 +13,152 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .direction(Direction::Horizontal)
         .margin(2)
         .constraints([
-            Constraint::Percentage(38),
-            Constraint::Length(3),
-            Constraint::Percentage(62),
+            Constraint::Percentage(22), // Spaces
+            Constraint::Length(3),      // Divider
+            Constraint::Percentage(34), // Projects
+            Constraint::Length(3),      // Divider
+            Constraint::Percentage(44), // Activities
         ])
         .split(area);
 
-    // Left: Projects
-    let proj_title_style = if app.projects_pane_focus == 0 {
-        Style::default()
-            .fg(theme.primary)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.muted)
+    let title_style = |focused: bool| {
+        if focused {
+            Style::default()
+                .fg(theme.primary)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.muted)
+        }
     };
-    let left_chunks = Layout::default()
+
+    // --- Column 0: Spaces ---
+    let space_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(3)])
         .split(cols[0]);
     f.render_widget(
         Paragraph::new(Span::styled(
-            format!("Projects ({})", app.projects.len()),
-            proj_title_style,
+            format!("Spaces ({})", app.spaces.len()),
+            title_style(app.projects_pane_focus == 0),
         )),
-        left_chunks[0],
+        space_chunks[0],
     );
 
-    if app.projects.is_empty() {
+    let space_name_w = (space_chunks[1].width as usize).saturating_sub(7).max(6);
+    let mut space_items: Vec<ListItem> = Vec::with_capacity(app.spaces.len() + 2);
+    {
+        let selected = app.selected_space_idx == 0;
+        let bg = if selected && app.projects_pane_focus == 0 {
+            theme.highlight
+        } else {
+            theme.bg
+        };
+        let marker = if selected { "▸ " } else { "  " };
+        space_items.push(ListItem::new(Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme.primary).bg(bg)),
+            Span::styled(
+                format!("{:<width$}", "All", width = space_name_w),
+                Style::default()
+                    .fg(theme.fg)
+                    .bg(bg)
+                    .add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+            Span::styled(
+                format!(" {:>3}", app.projects.len()),
+                Style::default().fg(theme.muted).bg(bg),
+            ),
+        ])));
+    }
+    for (idx, sp) in app.spaces.iter().enumerate() {
+        let selected = app.selected_space_idx == idx + 1;
+        let bg = if selected && app.projects_pane_focus == 0 {
+            theme.highlight
+        } else {
+            theme.bg
+        };
+        let marker = if selected { "▸ " } else { "  " };
+        let count = app
+            .projects
+            .iter()
+            .filter(|p| {
+                p.space
+                    .as_deref()
+                    .map(|s| s.eq_ignore_ascii_case(sp))
+                    .unwrap_or(false)
+            })
+            .count();
+        space_items.push(ListItem::new(Line::from(vec![
+            Span::styled(marker, Style::default().fg(theme.primary).bg(bg)),
+            Span::styled(
+                format!("{:<width$}", trunc(sp, space_name_w), width = space_name_w),
+                Style::default().fg(theme.secondary).bg(bg),
+            ),
+            Span::styled(
+                format!(" {:>3}", count),
+                Style::default().fg(theme.muted).bg(bg),
+            ),
+        ])));
+    }
+    f.render_widget(List::new(space_items), space_chunks[1]);
+
+    // Divider 1
+    let div1: Vec<Line> = (0..cols[1].height)
+        .map(|_| Line::from(Span::styled(" │ ", Style::default().fg(theme.border))))
+        .collect();
+    f.render_widget(Paragraph::new(div1), cols[1]);
+
+    // --- Column 1: Projects ---
+    let proj_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(3)])
+        .split(cols[2]);
+    let proj_scope = app.selected_projects_space().unwrap_or("All");
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            format!("Projects · {} ({})", proj_scope, app.filtered_projects.len()),
+            title_style(app.projects_pane_focus == 1),
+        )),
+        proj_chunks[0],
+    );
+
+    if app.filtered_projects.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "No projects yet. Press 'a' to add one.",
+                "No projects. Switch here (→) & press 'a'.",
                 Style::default().fg(theme.muted),
             )),
-            left_chunks[1],
+            proj_chunks[1],
         );
     } else {
+        let proj_name_w = (proj_chunks[1].width as usize).saturating_sub(9).max(10);
         let items: Vec<ListItem> = app
-            .projects
+            .filtered_projects
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let selected = i == app.selected_project_idx;
-                let bg = if selected && app.projects_pane_focus == 0 {
+                let bg = if selected && app.projects_pane_focus == 1 {
                     theme.highlight
                 } else {
                     theme.bg
                 };
                 let marker = if selected { "▸ " } else { "  " };
+                let label = if app.selected_space_idx == 0 {
+                    match p.space.as_deref().filter(|s| !s.is_empty()) {
+                        Some(sp) => format!("{} ({})", p.name, sp),
+                        None => p.name.clone(),
+                    }
+                } else {
+                    p.name.clone()
+                };
                 let line = Line::from(vec![
                     Span::styled(marker, Style::default().fg(theme.primary).bg(bg)),
                     Span::styled(
-                        format!("{:<20}", p.name),
+                        format!("{:<width$}", trunc(&label, proj_name_w), width = proj_name_w),
                         Style::default().fg(theme.fg).bg(bg),
                     ),
                     Span::styled(
@@ -74,57 +169,54 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ListItem::new(line)
             })
             .collect();
-        f.render_widget(List::new(items), left_chunks[1]);
+        f.render_widget(List::new(items), proj_chunks[1]);
     }
 
-    // Subtle vertical divider
-    let div_lines: Vec<Line> = (0..cols[1].height)
+    // Divider 2
+    let div2: Vec<Line> = (0..cols[3].height)
         .map(|_| Line::from(Span::styled(" │ ", Style::default().fg(theme.border))))
         .collect();
-    f.render_widget(Paragraph::new(div_lines), cols[1]);
+    f.render_widget(Paragraph::new(div2), cols[3]);
 
-    // Right: Activities for selected project
-    let act_title_style = if app.projects_pane_focus == 1 {
-        Style::default()
-            .fg(theme.primary)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.muted)
-    };
-    let right_chunks = Layout::default()
+    // --- Column 2: Activities for selected project ---
+    let act_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(3)])
-        .split(cols[2]);
+        .split(cols[4]);
 
-    let proj_name = app
-        .projects
+    let proj_header = app
+        .filtered_projects
         .get(app.selected_project_idx)
-        .map(|p| p.name.as_str())
-        .unwrap_or("—");
+        .map(|p| match p.space.as_deref().filter(|s| !s.is_empty()) {
+            Some(sp) => format!("{} › {}", sp, p.name),
+            None => p.name.clone(),
+        })
+        .unwrap_or_else(|| "—".to_string());
     f.render_widget(
         Paragraph::new(Span::styled(
-            format!("Activities · {}", proj_name),
-            act_title_style,
+            format!("Activities · {}", proj_header),
+            title_style(app.projects_pane_focus == 2),
         )),
-        right_chunks[0],
+        act_chunks[0],
     );
 
     if app.project_activities.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "No activities. Switch here (→) and press 'a' to add one.",
+                "No activities. Switch here (→) & press 'a'.",
                 Style::default().fg(theme.muted),
             )),
-            right_chunks[1],
+            act_chunks[1],
         );
     } else {
+        let act_name_w = (act_chunks[1].width as usize).saturating_sub(18).max(12);
         let items: Vec<ListItem> = app
             .project_activities
             .iter()
             .enumerate()
             .map(|(i, a)| {
                 let selected = i == app.selected_activity_idx;
-                let bg = if selected && app.projects_pane_focus == 1 {
+                let bg = if selected && app.projects_pane_focus == 2 {
                     theme.highlight
                 } else {
                     theme.bg
@@ -142,10 +234,13 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                             })
                             .bg(bg),
                     ),
-                    Span::styled(format!("{:<26}", a.name), Style::default().fg(fg).bg(bg)),
+                    Span::styled(
+                        format!("{:<width$}", trunc(&a.name, act_name_w), width = act_name_w),
+                        Style::default().fg(fg).bg(bg),
+                    ),
                     Span::styled(
                         format!(
-                            " {}/{}  ({}m)",
+                            " {}/{} ({}m)",
                             a.pomodoros_spent, a.estimated_pomodoros, a.total_focus_mins
                         ),
                         Style::default().fg(theme.muted).bg(bg),
@@ -154,6 +249,16 @@ pub fn render(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 ListItem::new(line)
             })
             .collect();
-        f.render_widget(List::new(items), right_chunks[1]);
+        f.render_widget(List::new(items), act_chunks[1]);
+    }
+}
+
+fn trunc(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
 }

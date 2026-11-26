@@ -5,6 +5,27 @@ All notable changes to `tomatui` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-26
+
+### Added
+- **Spaces (`Space → Project → Activity`)** as an optional, fluid grouping layer above Projects (e.g. `School`, `Work`, `Client`, `Personal`):
+  - Backwards-compatible SQLite schema migrations (`v2` and `v3`) adding `projects.space` and a `spaces` table so empty spaces persist cleanly.
+  - **3-Column Projects Tab (`Spaces │ Projects │ Activities`)**: add (`a`), rename/edit (`e`), filter, and remove (`d`) spaces alongside projects and activities.
+  - **Context Picker (`p`) & Timer**: assign or change Space, Project, and Activity together, with `Space · Project / Activity` shown on the Timer screen.
+  - **History & Stats Space Filtering**: dedicated `Space` column in History, clickable `Space: [All] ...` pill bars in both History and Stats controlled via `←`/`→` (`h`/`l`), and `space` column in CSV exports.
+- **Bulk Import & Agent Discovery CLI**:
+  - `tomatui import [FILE|-] [--dry-run] [--json]` to idempotently bulk-create spaces, projects, and activities in a single SQLite transaction.
+  - `tomatui guide [--json]` (aliases: `agent-help`, `schema`) providing a complete machine-readable or Markdown command and schema manifest for AI agents.
+  - `tomatui spaces list|add|delete` and `--space` flags across `start`, `projects add`, `sessions list`, `stats`, and `export`.
+
+### Changed
+- **Unified Interaction Model**:
+  - Universal `e` (Edit) across all three Projects panes (Spaces, Projects, Activities), History, and Settings (`Data Location`).
+  - Double-press `d` confirmation guard before deleting/archiving spaces, projects, activities, or sessions.
+  - Scrollable lists (`ListState`) across Projects, History, and Settings, plus expanded mouse click support for Space pills and list rows.
+  - Standardized modal shortcuts (`Tab`/`Shift+Tab` to move fields, `↑↓`/`←→` to cycle values) and updated the `?` Help modal.
+- Upgraded dependencies (`ratatui`, `crossterm`, `rusqlite`, `directories`).
+
 ## [0.1.0] - 2026-11-25
 
 ### Added
